@@ -19,7 +19,8 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "All vLLM instances on GPU pool are down"
+          summary: "All vLLM instances on GPU {{ $labels.gpu }} are down"
+          description: "Prometheus cannot reach any of the three replicas assigned to GPU {{ $labels.gpu }}."
 
       # High error rate (> 5% of requests returning 5xx)
       - alert: VLLMHighErrorRate

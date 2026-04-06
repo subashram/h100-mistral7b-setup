@@ -98,18 +98,18 @@ BAD_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "$ENDPOINT/chat/compl
 echo ""
 echo "Concurrent load test (10 parallel requests)..."
 PIDS=()
-TIMES=()
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
 for i in $(seq 1 10); do
     (
-        START=$(date +%s%N)
-        curl -sk -X POST "$ENDPOINT/chat/completions" \
+        curl -sk -o /dev/null -w "%{http_code}" -X POST "$ENDPOINT/chat/completions" \
             -H "Authorization: Bearer $API_KEY" \
             -H "Content-Type: application/json" \
             -d "{
                 \"model\": \"mistralai/Mistral-7B-Instruct-v0.3\",
                 \"messages\": [{\"role\":\"user\",\"content\":\"Say $i.\"}],
                 \"max_tokens\": 10
-            }" -o /dev/null -w "%{http_code} %{time_total}" 2>/dev/null
+            }" > "$TMP_DIR/$i.code" 2>/dev/null
     ) &
     PIDS+=($!)
 done
@@ -118,7 +118,20 @@ ALL_OK=true
 for pid in "${PIDS[@]}"; do
     wait "$pid" || ALL_OK=false
 done
-$ALL_OK && check "10 concurrent requests" "ok" || check "10 concurrent requests" "some failed"
+
+BAD_CODES=0
+for code_file in "$TMP_DIR"/*.code; do
+    [ -f "$code_file" ] || continue
+    if [ "$(cat "$code_file")" != "200" ]; then
+        BAD_CODES=$((BAD_CODES+1))
+    fi
+done
+
+if $ALL_OK && [ "$BAD_CODES" -eq 0 ]; then
+    check "10 concurrent requests" "ok"
+else
+    check "10 concurrent requests" "$BAD_CODES responses were non-200"
+fi
 
 # --- Summary ---
 echo ""

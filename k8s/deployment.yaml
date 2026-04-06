@@ -150,7 +150,7 @@ spec:
     app: mistral-7b
 
 ---
-# --- HPA (autoscale on queue depth) ---
+# --- HPA (uses built-in CPU metrics; no custom metrics adapter required) ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -177,13 +177,12 @@ spec:
         value: 2
         periodSeconds: 120
   metrics:
-  - type: Pods
-    pods:
-      metric:
-        name: vllm_num_requests_waiting
+  - type: Resource
+    resource:
+      name: cpu
       target:
-        type: AverageValue
-        averageValue: "10"
+        type: Utilization
+        averageUtilization: 70
 
 ---
 # --- Ingress ---

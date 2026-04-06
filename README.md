@@ -50,12 +50,10 @@ cp .env.example .env
 | `docker-compose.yml`| Orchestrates all vLLM instances + infra       |
 | `nginx/`            | API gateway with auth, rate limiting, TLS     |
 | `monitoring/`       | Prometheus + Grafana dashboards               |
-| `scripts/`          | Deploy, health check, smoke test, rollback    |
-| `systemd/`          | Alternative: bare-metal systemd units         |
+| `scripts/`          | Deploy, health check, smoke test              |
 | `k8s/`              | Alternative: Kubernetes manifests             |
 
 ## Deployment Options
 
 1. **Docker Compose** (recommended for single-node): `docker compose up -d`
-2. **Systemd** (bare metal): `./scripts/deploy.sh systemd-install`
-3. **Kubernetes**: `kubectl apply -k k8s/`
+2. **Kubernetes**: `kubectl apply -f k8s/`
