@@ -13,28 +13,28 @@ alerting:
 scrape_configs:
   - job_name: "vllm"
     static_configs:
-      - targets: ["vllm-g0-i0:8000", "vllm-g0-i1:8000", "vllm-g0-i2:8000"]
+      - targets: ["vllm-g0:8000"]
         labels:
           gpu: "0"
-      - targets: ["vllm-g1-i0:8000", "vllm-g1-i1:8000", "vllm-g1-i2:8000"]
+      - targets: ["vllm-g1:8000"]
         labels:
           gpu: "1"
-      - targets: ["vllm-g2-i0:8000", "vllm-g2-i1:8000", "vllm-g2-i2:8000"]
+      - targets: ["vllm-g2:8000"]
         labels:
           gpu: "2"
-      - targets: ["vllm-g3-i0:8000", "vllm-g3-i1:8000", "vllm-g3-i2:8000"]
+      - targets: ["vllm-g3:8000"]
         labels:
           gpu: "3"
-      - targets: ["vllm-g4-i0:8000", "vllm-g4-i1:8000", "vllm-g4-i2:8000"]
+      - targets: ["vllm-g4:8000"]
         labels:
           gpu: "4"
-      - targets: ["vllm-g5-i0:8000", "vllm-g5-i1:8000", "vllm-g5-i2:8000"]
+      - targets: ["vllm-g5:8000"]
         labels:
           gpu: "5"
-      - targets: ["vllm-g6-i0:8000", "vllm-g6-i1:8000", "vllm-g6-i2:8000"]
+      - targets: ["vllm-g6:8000"]
         labels:
           gpu: "6"
-      - targets: ["vllm-g7-i0:8000", "vllm-g7-i1:8000", "vllm-g7-i2:8000"]
+      - targets: ["vllm-g7:8000"]
         labels:
           gpu: "7"
     metrics_path: /metrics

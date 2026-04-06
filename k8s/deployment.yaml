@@ -1,5 +1,5 @@
 # =============================================================================
-# Kubernetes Alternative — Mistral 7B on 8×H100
+# Kubernetes Alternative — Mistral 7B on 8xH100
 # Apply: kubectl apply -f k8s/
 # =============================================================================
 
@@ -22,24 +22,23 @@ data:
   MODEL_ID: "mistralai/Mistral-7B-Instruct-v0.3"
   MODEL_DTYPE: "fp8"
   MAX_MODEL_LEN: "8192"
-  GPU_MEMORY_UTILIZATION: "0.30"
+  GPU_MEMORY_UTILIZATION: "0.90"
 
 ---
 # --- Deployment ---
-# Uses NVIDIA GPU time-slicing (configure via gpu-operator ClusterPolicy)
-# to run 3 pods per GPU = 24 pods across 8 GPUs
+# Baseline topology: one vLLM pod per GPU = 8 pods across 8 GPUs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mistral-7b
   namespace: mistral-prod
 spec:
-  replicas: 24
+  replicas: 8
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 3       # one GPU pool at a time
-      maxSurge: 3
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: mistral-7b
@@ -76,7 +75,7 @@ spec:
           requests:
             cpu: "2"
             memory: "12Gi"
-            nvidia.com/gpu: "1"    # fractional via time-slicing
+            nvidia.com/gpu: "1"
           limits:
             cpu: "4"
             memory: "16Gi"
@@ -162,7 +161,7 @@ spec:
     kind: Deployment
     name: mistral-7b
   minReplicas: 8
-  maxReplicas: 40
+  maxReplicas: 16
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 60
@@ -223,7 +222,7 @@ metadata:
   name: mistral-7b-pdb
   namespace: mistral-prod
 spec:
-  minAvailable: 16                  # at least 16/24 pods during disruption
+  minAvailable: 6
   selector:
     matchLabels:
       app: mistral-7b

@@ -14,13 +14,13 @@ groups:
       # All instances on a GPU are down
       - alert: VLLMGPUPoolDown
         expr: |
-          count by (gpu) (up{job="vllm"} == 0) == 3
+          count by (gpu) (up{job="vllm"} == 0) == 1
         for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "All vLLM instances on GPU {{ $labels.gpu }} are down"
-          description: "Prometheus cannot reach any of the three replicas assigned to GPU {{ $labels.gpu }}."
+          summary: "The vLLM worker on GPU {{ $labels.gpu }} is down"
+          description: "Prometheus cannot reach the serving worker assigned to GPU {{ $labels.gpu }}."
 
       # High error rate (> 5% of requests returning 5xx)
       - alert: VLLMHighErrorRate

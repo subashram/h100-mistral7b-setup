@@ -1,5 +1,6 @@
 # =============================================================================
-# Mistral 7B Production Stack — 8×H100, 24 vLLM instances
+# Mistral 7B Production Stack — 8xH100, 8 vLLM workers
+# Baseline topology: 1 vLLM instance per GPU for multi-user throughput.
 # =============================================================================
 # Usage: docker compose --env-file .env up -d
 # =============================================================================
@@ -9,7 +10,7 @@ x-vllm-base: &vllm-base
   runtime: nvidia
   restart: unless-stopped
   ipc: host
-  shm_size: ${VLLM_SHM_SIZE:-4g}
+  shm_size: ${VLLM_SHM_SIZE:-8g}
   ulimits:
     memlock: -1
     nofile:
@@ -21,13 +22,14 @@ x-vllm-base: &vllm-base
   command: >
     --model ${MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
     --dtype ${MODEL_DTYPE:-fp8}
-    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.30}
+    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.90}
     --max-model-len ${MAX_MODEL_LEN:-8192}
     --enable-auto-tool-choice
     --tool-call-parser mistral
     --disable-log-requests
     --uvicorn-log-level warning
-    --max-num-batched-tokens 8192
+    --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-16384}
+    --max-num-seqs ${MAX_NUM_SEQS:-256}
     --enable-prefix-caching
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -38,225 +40,76 @@ x-vllm-base: &vllm-base
   deploy:
     resources:
       limits:
-        cpus: "${VLLM_CPU_LIMIT:-4}"
-        memory: ${VLLM_MEM_LIMIT:-16g}
+        cpus: "${VLLM_CPU_LIMIT:-10}"
+        memory: ${VLLM_MEM_LIMIT:-48g}
 
 services:
   # ---------------------------------------------------------------------------
-  # GPU 0 — 3 instances (ports 8000-8002)
+  # Baseline serving topology: one worker per GPU
   # ---------------------------------------------------------------------------
-  vllm-g0-i0:
+  vllm-g0:
     <<: *vllm-base
-    container_name: vllm-g0-i0
+    container_name: vllm-g0
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
-      - VLLM_INSTANCE_ID=g0-i0
+      - VLLM_INSTANCE_ID=g0
     ports: ["8000:8000"]
 
-  vllm-g0-i1:
+  vllm-g1:
     <<: *vllm-base
-    container_name: vllm-g0-i1
+    container_name: vllm-g1
     environment:
-      - NVIDIA_VISIBLE_DEVICES=0
-      - VLLM_INSTANCE_ID=g0-i1
+      - NVIDIA_VISIBLE_DEVICES=1
+      - VLLM_INSTANCE_ID=g1
     ports: ["8001:8000"]
 
-  vllm-g0-i2:
+  vllm-g2:
     <<: *vllm-base
-    container_name: vllm-g0-i2
+    container_name: vllm-g2
     environment:
-      - NVIDIA_VISIBLE_DEVICES=0
-      - VLLM_INSTANCE_ID=g0-i2
+      - NVIDIA_VISIBLE_DEVICES=2
+      - VLLM_INSTANCE_ID=g2
     ports: ["8002:8000"]
 
-  # ---------------------------------------------------------------------------
-  # GPU 1 — 3 instances (ports 8003-8005)
-  # ---------------------------------------------------------------------------
-  vllm-g1-i0:
+  vllm-g3:
     <<: *vllm-base
-    container_name: vllm-g1-i0
+    container_name: vllm-g3
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1
-      - VLLM_INSTANCE_ID=g1-i0
+      - NVIDIA_VISIBLE_DEVICES=3
+      - VLLM_INSTANCE_ID=g3
     ports: ["8003:8000"]
 
-  vllm-g1-i1:
+  vllm-g4:
     <<: *vllm-base
-    container_name: vllm-g1-i1
+    container_name: vllm-g4
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1
-      - VLLM_INSTANCE_ID=g1-i1
+      - NVIDIA_VISIBLE_DEVICES=4
+      - VLLM_INSTANCE_ID=g4
     ports: ["8004:8000"]
 
-  vllm-g1-i2:
+  vllm-g5:
     <<: *vllm-base
-    container_name: vllm-g1-i2
+    container_name: vllm-g5
     environment:
-      - NVIDIA_VISIBLE_DEVICES=1
-      - VLLM_INSTANCE_ID=g1-i2
+      - NVIDIA_VISIBLE_DEVICES=5
+      - VLLM_INSTANCE_ID=g5
     ports: ["8005:8000"]
 
-  # ---------------------------------------------------------------------------
-  # GPU 2 — 3 instances (ports 8006-8008)
-  # ---------------------------------------------------------------------------
-  vllm-g2-i0:
+  vllm-g6:
     <<: *vllm-base
-    container_name: vllm-g2-i0
+    container_name: vllm-g6
     environment:
-      - NVIDIA_VISIBLE_DEVICES=2
-      - VLLM_INSTANCE_ID=g2-i0
+      - NVIDIA_VISIBLE_DEVICES=6
+      - VLLM_INSTANCE_ID=g6
     ports: ["8006:8000"]
 
-  vllm-g2-i1:
+  vllm-g7:
     <<: *vllm-base
-    container_name: vllm-g2-i1
+    container_name: vllm-g7
     environment:
-      - NVIDIA_VISIBLE_DEVICES=2
-      - VLLM_INSTANCE_ID=g2-i1
+      - NVIDIA_VISIBLE_DEVICES=7
+      - VLLM_INSTANCE_ID=g7
     ports: ["8007:8000"]
-
-  vllm-g2-i2:
-    <<: *vllm-base
-    container_name: vllm-g2-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=2
-      - VLLM_INSTANCE_ID=g2-i2
-    ports: ["8008:8000"]
-
-  # ---------------------------------------------------------------------------
-  # GPU 3 — 3 instances (ports 8009-8011)
-  # ---------------------------------------------------------------------------
-  vllm-g3-i0:
-    <<: *vllm-base
-    container_name: vllm-g3-i0
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=3
-      - VLLM_INSTANCE_ID=g3-i0
-    ports: ["8009:8000"]
-
-  vllm-g3-i1:
-    <<: *vllm-base
-    container_name: vllm-g3-i1
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=3
-      - VLLM_INSTANCE_ID=g3-i1
-    ports: ["8010:8000"]
-
-  vllm-g3-i2:
-    <<: *vllm-base
-    container_name: vllm-g3-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=3
-      - VLLM_INSTANCE_ID=g3-i2
-    ports: ["8011:8000"]
-
-  # ---------------------------------------------------------------------------
-  # GPU 4 — 3 instances (ports 8012-8014)
-  # ---------------------------------------------------------------------------
-  vllm-g4-i0:
-    <<: *vllm-base
-    container_name: vllm-g4-i0
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=4
-      - VLLM_INSTANCE_ID=g4-i0
-    ports: ["8012:8000"]
-
-  vllm-g4-i1:
-    <<: *vllm-base
-    container_name: vllm-g4-i1
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=4
-      - VLLM_INSTANCE_ID=g4-i1
-    ports: ["8013:8000"]
-
-  vllm-g4-i2:
-    <<: *vllm-base
-    container_name: vllm-g4-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=4
-      - VLLM_INSTANCE_ID=g4-i2
-    ports: ["8014:8000"]
-
-  # ---------------------------------------------------------------------------
-  # GPU 5 — 3 instances (ports 8015-8017)
-  # ---------------------------------------------------------------------------
-  vllm-g5-i0:
-    <<: *vllm-base
-    container_name: vllm-g5-i0
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=5
-      - VLLM_INSTANCE_ID=g5-i0
-    ports: ["8015:8000"]
-
-  vllm-g5-i1:
-    <<: *vllm-base
-    container_name: vllm-g5-i1
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=5
-      - VLLM_INSTANCE_ID=g5-i1
-    ports: ["8016:8000"]
-
-  vllm-g5-i2:
-    <<: *vllm-base
-    container_name: vllm-g5-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=5
-      - VLLM_INSTANCE_ID=g5-i2
-    ports: ["8017:8000"]
-
-  # ---------------------------------------------------------------------------
-  # GPU 6 — 3 instances (ports 8018-8020)
-  # ---------------------------------------------------------------------------
-  vllm-g6-i0:
-    <<: *vllm-base
-    container_name: vllm-g6-i0
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=6
-      - VLLM_INSTANCE_ID=g6-i0
-    ports: ["8018:8000"]
-
-  vllm-g6-i1:
-    <<: *vllm-base
-    container_name: vllm-g6-i1
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=6
-      - VLLM_INSTANCE_ID=g6-i1
-    ports: ["8019:8000"]
-
-  vllm-g6-i2:
-    <<: *vllm-base
-    container_name: vllm-g6-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=6
-      - VLLM_INSTANCE_ID=g6-i2
-    ports: ["8020:8000"]
-
-  # ---------------------------------------------------------------------------
-  # GPU 7 — 3 instances (ports 8021-8023)
-  # ---------------------------------------------------------------------------
-  vllm-g7-i0:
-    <<: *vllm-base
-    container_name: vllm-g7-i0
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=7
-      - VLLM_INSTANCE_ID=g7-i0
-    ports: ["8021:8000"]
-
-  vllm-g7-i1:
-    <<: *vllm-base
-    container_name: vllm-g7-i1
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=7
-      - VLLM_INSTANCE_ID=g7-i1
-    ports: ["8022:8000"]
-
-  vllm-g7-i2:
-    <<: *vllm-base
-    container_name: vllm-g7-i2
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=7
-      - VLLM_INSTANCE_ID=g7-i2
-    ports: ["8023:8000"]
 
   # ---------------------------------------------------------------------------
   # API Gateway — Nginx
@@ -274,14 +127,14 @@ services:
       - ./nginx/certs:/etc/nginx/certs:ro
       - /var/log/mistral/nginx:/var/log/nginx
     depends_on:
-      vllm-g0-i0: { condition: service_healthy }
-      vllm-g1-i0: { condition: service_healthy }
-      vllm-g2-i0: { condition: service_healthy }
-      vllm-g3-i0: { condition: service_healthy }
-      vllm-g4-i0: { condition: service_healthy }
-      vllm-g5-i0: { condition: service_healthy }
-      vllm-g6-i0: { condition: service_healthy }
-      vllm-g7-i0: { condition: service_healthy }
+      vllm-g0: { condition: service_healthy }
+      vllm-g1: { condition: service_healthy }
+      vllm-g2: { condition: service_healthy }
+      vllm-g3: { condition: service_healthy }
+      vllm-g4: { condition: service_healthy }
+      vllm-g5: { condition: service_healthy }
+      vllm-g6: { condition: service_healthy }
+      vllm-g7: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 5s

@@ -13,8 +13,8 @@
         "fieldConfig": {
           "defaults": { "thresholds": { "steps": [
             { "color": "red", "value": 0 },
-            { "color": "yellow", "value": 18 },
-            { "color": "green", "value": 24 }
+            { "color": "yellow", "value": 6 },
+            { "color": "green", "value": 8 }
           ]}}
         }
       },

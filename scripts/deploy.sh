@@ -8,9 +8,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 ENV_FILE="$SCRIPT_DIR/.env"
-TOTAL_INSTANCES=24
 GPUS=8
-INSTANCES_PER_GPU=3
+TOTAL_INSTANCES=$GPUS
+BASE_PORT=8000
 
 cd "$SCRIPT_DIR"
 
@@ -66,7 +66,7 @@ preflight() {
 # ---- Start ----
 start() {
     preflight
-    log "Starting Mistral 7B production stack ($TOTAL_INSTANCES instances)..."
+    log "Starting Mistral 7B production stack ($TOTAL_INSTANCES workers, one per GPU)..."
 
     # Pull images first
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
@@ -75,15 +75,16 @@ start() {
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d \
         prometheus grafana alertmanager loki promtail
 
-    log "Starting vLLM instances (this takes 1-2 minutes for model loading)..."
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+    log "Starting vLLM workers (this can take a few minutes while weights are loaded)..."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d \
+        vllm-g0 vllm-g1 vllm-g2 vllm-g3 vllm-g4 vllm-g5 vllm-g6 vllm-g7
 
     # Wait for health
     log "Waiting for instances to become healthy..."
     wait_healthy 300
 
     log "Starting nginx gateway..."
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d nginx
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d nginx nginx-exporter
 
     log "Stack is up! Endpoint: https://$(hostname -I | awk '{print $1}')/v1/"
 }
@@ -120,17 +121,15 @@ health() {
     local healthy=0 unhealthy=0
 
     for gpu in $(seq 0 $((GPUS-1))); do
-        for inst in $(seq 0 $((INSTANCES_PER_GPU-1))); do
-            port=$((8000 + gpu * INSTANCES_PER_GPU + inst))
-            name="vllm-g${gpu}-i${inst}"
-            if curl -sf "http://localhost:$port/health" &>/dev/null; then
-                echo -e "  ${GREEN}✓${NC} $name (port $port)"
-                healthy=$((healthy+1))
-            else
-                echo -e "  ${RED}✗${NC} $name (port $port)"
-                unhealthy=$((unhealthy+1))
-            fi
-        done
+        port=$((BASE_PORT + gpu))
+        name="vllm-g${gpu}"
+        if curl -sf "http://localhost:$port/health" &>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} $name (port $port)"
+            healthy=$((healthy+1))
+        else
+            echo -e "  ${RED}✗${NC} $name (port $port)"
+            unhealthy=$((unhealthy+1))
+        fi
     done
 
     echo ""
@@ -156,32 +155,27 @@ rolling_update() {
     log "Starting rolling update..."
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" pull
 
-    # Update one GPU pool at a time to maintain capacity
+    # Update one GPU worker at a time to maintain capacity
     for gpu in $(seq 0 $((GPUS-1))); do
-        log "Updating GPU $gpu instances..."
-        for inst in $(seq 0 $((INSTANCES_PER_GPU-1))); do
-            name="vllm-g${gpu}-i${inst}"
-            log "  Restarting $name..."
-            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$name"
+        name="vllm-g${gpu}"
+        log "Updating GPU $gpu worker..."
+        docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps "$name"
 
-            # Wait for this instance to become healthy before next
-            local port=$((8000 + gpu * INSTANCES_PER_GPU + inst))
-            local tries=0
-            while ! curl -sf "http://localhost:$port/health" &>/dev/null; do
-                sleep 5
-                tries=$((tries+1))
-                if [ $tries -gt 60 ]; then
-                    err "$name failed to start, aborting rolling update"
-                    exit 1
-                fi
-            done
-            log "  $name is healthy"
+        local port=$((BASE_PORT + gpu))
+        local tries=0
+        while ! curl -sf "http://localhost:$port/health" &>/dev/null; do
+            sleep 5
+            tries=$((tries+1))
+            if [ $tries -gt 60 ]; then
+                err "$name failed to start, aborting rolling update"
+                exit 1
+            fi
         done
-        log "GPU $gpu pool updated"
+        log "  $name is healthy"
     done
 
-    # Update nginx last
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps nginx
+    # Update gateway last
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps nginx nginx-exporter
     log "Rolling update complete"
 }
 

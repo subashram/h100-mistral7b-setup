@@ -1,0 +1,14 @@
+.git
+.gitignore
+.DS_Store
+._*
+.env
+.env.local
+.env.*.local
+__pycache__/
+*.pyc
+.venv/
+venv/
+tmp/
+.tmp/
+benchmark-results/
