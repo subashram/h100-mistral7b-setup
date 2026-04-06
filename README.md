@@ -22,6 +22,11 @@ On hosts that already run a system `nginx`, the recommended pattern is:
 - bind the containerized Mistral gateway to `127.0.0.1:8081/8443`
 - let the host `nginx` reverse-proxy into the internal gateway
 
+Current status:
+
+- host `nginx` HTTP proxy on `80` is in place
+- host-side TLS on `443` is still a follow-up item and is documented in [Deployment](docs/deployment.md) and [Operations](docs/operations.md)
+
 ## Architecture Overview
 
 ```mermaid

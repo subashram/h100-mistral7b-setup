@@ -119,3 +119,18 @@ Then open:
 - public TLS is not yet configured on the host
 - direct external HTTP is still blocked by network policy outside the machine
 - alerts still need real destinations and final tuning
+
+## HTTPS Rollout Checklist
+
+Before declaring HTTPS production-ready:
+
+- confirm cloud/network ingress for `443`
+- install the final host certificate and key
+- add a host `nginx` `443` server block
+- keep the host `80 -> 443` redirect
+- validate locally:
+  - `curl -kI https://127.0.0.1`
+  - `curl -I http://127.0.0.1`
+- validate externally after firewall changes:
+  - `curl -I http://<public-ip>`
+  - `curl -kI https://<public-ip>` or use the real hostname

@@ -108,6 +108,31 @@ http://127.0.0.1:8081
 
 This keeps public ports on the host while the app gateway stays internal to the machine.
 
+## Host TLS Follow-up
+
+The intended final state is for host `nginx` to terminate TLS on public `443` and proxy to the internal gateway on `127.0.0.1:8081`.
+
+What still needs to happen:
+
+1. choose the certificate source
+   - real CA-issued certificate for production
+   - temporary self-signed certificate only for internal testing
+2. place the certificate and key on the host
+   - recommended path: `/etc/nginx/certs/`
+3. add a host `nginx` `server` block for `443 ssl`
+4. configure that `443` server block to proxy to `http://127.0.0.1:8081`
+5. keep port `80` as a redirect to `https://$host$request_uri`
+6. validate with `sudo nginx -t` and reload host `nginx`
+7. open cloud firewall / NSG rules for `443`
+
+Recommended final pattern:
+
+- host `nginx` handles public `80/443`
+- host `80` redirects to `443`
+- host `443` terminates TLS
+- host `443` proxies to `127.0.0.1:8081`
+- the containerized gateway remains internal-only on `127.0.0.1:8081/8443`
+
 ## Known Follow-ups
 
 - Add public TLS on host `nginx`
