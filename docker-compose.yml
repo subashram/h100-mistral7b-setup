@@ -10,6 +10,9 @@ x-vllm-base: &vllm-base
   runtime: nvidia
   restart: unless-stopped
   ipc: host
+  environment:
+    HF_TOKEN: ${HF_TOKEN:-}
+    HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
   shm_size: ${VLLM_SHM_SIZE:-8g}
   ulimits:
     memlock: -1
@@ -17,16 +20,16 @@ x-vllm-base: &vllm-base
       soft: 65536
       hard: 65536
   volumes:
-    - model-cache:/root/.cache/huggingface
-    - /var/log/mistral:/var/log/vllm
+    - ${MODEL_CACHE_ROOT:-/mnt/compass/mistral/model-cache}:/root/.cache/huggingface
+    - ${VLLM_CACHE_ROOT:-/mnt/compass/mistral/vllm-cache}:/root/.cache/vllm
+    - ${LOG_ROOT:-/mnt/compass/mistral/logs}:/var/log/vllm
   command: >
-    --model ${MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
-    --dtype ${MODEL_DTYPE:-fp8}
+    ${MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
+    --dtype ${MODEL_DTYPE:-bfloat16}
     --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.90}
     --max-model-len ${MAX_MODEL_LEN:-8192}
     --enable-auto-tool-choice
     --tool-call-parser mistral
-    --disable-log-requests
     --uvicorn-log-level warning
     --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-16384}
     --max-num-seqs ${MAX_NUM_SEQS:-256}
@@ -52,7 +55,6 @@ services:
     container_name: vllm-g0
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
-      - VLLM_INSTANCE_ID=g0
     ports: ["8000:8000"]
 
   vllm-g1:
@@ -60,7 +62,6 @@ services:
     container_name: vllm-g1
     environment:
       - NVIDIA_VISIBLE_DEVICES=1
-      - VLLM_INSTANCE_ID=g1
     ports: ["8001:8000"]
 
   vllm-g2:
@@ -68,7 +69,6 @@ services:
     container_name: vllm-g2
     environment:
       - NVIDIA_VISIBLE_DEVICES=2
-      - VLLM_INSTANCE_ID=g2
     ports: ["8002:8000"]
 
   vllm-g3:
@@ -76,7 +76,6 @@ services:
     container_name: vllm-g3
     environment:
       - NVIDIA_VISIBLE_DEVICES=3
-      - VLLM_INSTANCE_ID=g3
     ports: ["8003:8000"]
 
   vllm-g4:
@@ -84,7 +83,6 @@ services:
     container_name: vllm-g4
     environment:
       - NVIDIA_VISIBLE_DEVICES=4
-      - VLLM_INSTANCE_ID=g4
     ports: ["8004:8000"]
 
   vllm-g5:
@@ -92,7 +90,6 @@ services:
     container_name: vllm-g5
     environment:
       - NVIDIA_VISIBLE_DEVICES=5
-      - VLLM_INSTANCE_ID=g5
     ports: ["8005:8000"]
 
   vllm-g6:
@@ -100,7 +97,6 @@ services:
     container_name: vllm-g6
     environment:
       - NVIDIA_VISIBLE_DEVICES=6
-      - VLLM_INSTANCE_ID=g6
     ports: ["8006:8000"]
 
   vllm-g7:
@@ -108,7 +104,6 @@ services:
     container_name: vllm-g7
     environment:
       - NVIDIA_VISIBLE_DEVICES=7
-      - VLLM_INSTANCE_ID=g7
     ports: ["8007:8000"]
 
   # ---------------------------------------------------------------------------
@@ -119,13 +114,13 @@ services:
     container_name: mistral-gateway
     restart: unless-stopped
     ports:
-      - "443:443"
-      - "80:80"
+      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_HTTP_PORT:-8081}:80"
+      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_HTTPS_PORT:-8443}:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/api_keys.conf:/etc/nginx/api_keys.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
-      - /var/log/mistral/nginx:/var/log/nginx
+      - ${LOG_ROOT:-/mnt/compass/mistral/logs}/nginx:/var/log/nginx
     depends_on:
       vllm-g0: { condition: service_healthy }
       vllm-g1: { condition: service_healthy }
@@ -154,7 +149,7 @@ services:
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus-data:/prometheus
+      - ${PROMETHEUS_DATA_ROOT:-/mnt/compass/mistral/prometheus}:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=30d'
@@ -171,7 +166,7 @@ services:
     volumes:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - grafana-data:/var/lib/grafana
+      - ${GRAFANA_DATA_ROOT:-/mnt/compass/mistral/grafana}:/var/lib/grafana
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -190,7 +185,7 @@ services:
     restart: unless-stopped
     ports: ["3100:3100"]
     volumes:
-      - loki-data:/loki
+      - ${LOKI_DATA_ROOT:-/mnt/compass/mistral/loki}:/loki
 
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:1.1.0
@@ -207,12 +202,5 @@ services:
     container_name: mistral-promtail
     restart: unless-stopped
     volumes:
-      - /var/log/mistral:/var/log/mistral:ro
+      - ${LOG_ROOT:-/mnt/compass/mistral/logs}:/var/log/compass/mistral:ro
       - ./monitoring/promtail.yml:/etc/promtail/config.yml:ro
-
-volumes:
-  model-cache:
-    driver: local
-  prometheus-data:
-  grafana-data:
-  loki-data:

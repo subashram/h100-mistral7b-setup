@@ -13,7 +13,7 @@ scrape_configs:
       - targets: [localhost]
         labels:
           job: nginx
-          __path__: /var/log/mistral/nginx/*.log
+          __path__: /var/log/compass/mistral/nginx/*.log
     pipeline_stages:
       - json:
           expressions:
@@ -29,4 +29,4 @@ scrape_configs:
       - targets: [localhost]
         labels:
           job: vllm
-          __path__: /var/log/mistral/vllm*.log
+          __path__: /var/log/compass/mistral/*.log

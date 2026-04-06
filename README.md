@@ -9,6 +9,19 @@ This repository is tuned for serving `mistralai/Mistral-7B-Instruct-v0.3` on a d
 
 The baseline goal is production-grade multi-user inference with tool/function calling support and enough observability to tune real traffic safely.
 
+Additional documentation:
+
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
+- [Operations](docs/operations.md)
+- [Monitoring](docs/monitoring.md)
+
+On hosts that already run a system `nginx`, the recommended pattern is:
+
+- keep the system `nginx` on public ports `80/443`
+- bind the containerized Mistral gateway to `127.0.0.1:8081/8443`
+- let the host `nginx` reverse-proxy into the internal gateway
+
 ## Architecture Overview
 
 ```mermaid
@@ -60,6 +73,9 @@ Required host software:
 - `jq`
 - `git`
 - `openssl`
+- a writable high-capacity data path such as `/mnt/compass/mistral`
+
+If the selected `MODEL_ID` is pulled from Hugging Face, set `HF_TOKEN` in `.env` before first start. This is especially important for gated model repos.
 
 Optional but useful:
 
@@ -74,16 +90,21 @@ Use `scripts/host-prereqs.sh` to check, report, and optionally install the missi
 # 1. Configure environment
 cp .env.example .env
 
-# 2. Review .env and nginx/api_keys.conf
+# 2. Set HF_TOKEN if your model requires Hugging Face auth
 
-# 3. Launch the stack
+# 3. Review .env and nginx/api_keys.conf
+
+# 4. Launch the stack
 ./scripts/deploy.sh start
 
-# 4. Verify model worker and gateway health
+# 5. Verify model worker and gateway health
 ./scripts/deploy.sh health
 
-# 5. Run the smoke test
+# 6. Run the smoke test
 ./scripts/smoke-test.sh
+
+# 7. Run targeted API tests
+./scripts/api-test.sh
 ```
 
 ## Host Prerequisite Script
@@ -124,7 +145,11 @@ You can prepare the benchmarking workflow locally before touching the node:
 - `8` vLLM workers total
 - `1` worker bound to each GPU via `NVIDIA_VISIBLE_DEVICES`
 - host ports `8000` through `8007` exposed for direct worker health and debugging
-- `Nginx` fronts the workers on `80/443`
+- deployed app root at `/opt/compass/mistral`
+- persistent data under `/mnt/compass/mistral`
+- logs under `/mnt/compass/mistral/logs`
+- the containerized `Nginx` gateway listens on `127.0.0.1:8081/8443`
+- the host `nginx` should front the internal gateway on public ports `80/443`
 - `Grafana` on `3000`
 - `Prometheus` on `9090`
 - `Alertmanager` on `9093`
@@ -138,7 +163,7 @@ The defaults in `.env.example` are biased toward using the H100s rather than pre
 - `MAX_MODEL_LEN=8192`
 - `MAX_NUM_BATCHED_TOKENS=16384`
 - `MAX_NUM_SEQS=256`
-- `MODEL_DTYPE=fp8`
+- `MODEL_DTYPE=bfloat16`
 - `VLLM_CPU_LIMIT=10`
 - `VLLM_MEM_LIMIT=48g`
 - `VLLM_SHM_SIZE=8g`
@@ -167,6 +192,8 @@ This enables OpenAI-compatible tool/function calling behavior through vLLM for M
 Before first deployment, review:
 
 - `.env.example` and create `.env`
+- `HF_TOKEN` if `MODEL_ID` is hosted on Hugging Face
+- `DATA_ROOT` and related `/mnt/compass/mistral` paths
 - `nginx/api_keys.conf` for valid API keys
 - `nginx/nginx.conf` for gateway policy
 - `nginx/certs/server.crt`
@@ -187,13 +214,56 @@ Common commands:
 ./scripts/deploy.sh stop
 ```
 
+Useful validation commands:
+
+```bash
+./scripts/smoke-test.sh
+./scripts/api-test.sh
+TEST_MODE=tools ./scripts/api-test.sh
+ENDPOINT=http://127.0.0.1:8081/v1 ./scripts/api-test.sh
+```
+
 What the deploy script does:
 
 1. Runs preflight checks for Docker, NVIDIA runtime, GPU count, disk, and `.env`.
 2. Starts monitoring services first.
-3. Starts all `8` vLLM workers.
-4. Waits for all workers to report healthy.
-5. Starts `Nginx` and the Nginx Prometheus exporter.
+3. Starts `vllm-g0` first to warm the shared model cache.
+4. Starts the remaining `7` workers after the first worker is healthy.
+5. Waits for all workers to report healthy.
+6. Starts the internal `Nginx` gateway and the Nginx Prometheus exporter.
+7. Expects the host `nginx` to proxy public traffic to `127.0.0.1:8081`.
+
+## Monitoring Access
+
+The monitoring services run on the host, but the recommended access path is an SSH tunnel instead of public exposure.
+
+Available services:
+
+- `Grafana` on `localhost:3000`
+- `Prometheus` on `localhost:9090`
+- `Alertmanager` on `localhost:9093`
+- `Loki` on `localhost:3100`
+
+Example tunnel:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_compass_mistral \
+  -L 8088:localhost:80 \
+  -L 3000:localhost:3000 \
+  -L 9090:localhost:9090 \
+  -L 9093:localhost:9093 \
+  -L 3100:localhost:3100 \
+  compass@20.174.12.45
+```
+
+Then open:
+
+- `http://localhost:8088` for the host `nginx` entrypoint
+- `http://localhost:3000` for Grafana
+- `http://localhost:9090` for Prometheus
+- `http://localhost:9093` for Alertmanager
+
+If you later want browser access without SSH tunnels, expose Grafana through the host `nginx` behind authentication instead of opening `3000` publicly.
 
 ## Benchmarking
 

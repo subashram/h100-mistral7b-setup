@@ -11,6 +11,8 @@ ENV_FILE="$SCRIPT_DIR/.env"
 GPUS=8
 TOTAL_INSTANCES=$GPUS
 BASE_PORT=8000
+DATA_ROOT_DEFAULT=/mnt/compass/mistral
+GATEWAY_HTTP_PORT_DEFAULT=8081
 
 cd "$SCRIPT_DIR"
 
@@ -20,6 +22,18 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 err()  { echo -e "${RED}[ERROR]${NC} $1"; }
+
+get_env_value() {
+    local key=$1
+    local fallback=$2
+    local value
+    value=$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    if [ -n "$value" ]; then
+        echo "$value"
+    else
+        echo "$fallback"
+    fi
+}
 
 # ---- Pre-flight checks ----
 preflight() {
@@ -60,6 +74,30 @@ preflight() {
         cp "$SCRIPT_DIR/.env.example" "$ENV_FILE"
     fi
 
+    local data_root log_root model_cache_root vllm_cache_root prometheus_data_root grafana_data_root loki_data_root
+    data_root=$(get_env_value "DATA_ROOT" "$DATA_ROOT_DEFAULT")
+    log_root=$(get_env_value "LOG_ROOT" "${data_root}/logs")
+    model_cache_root=$(get_env_value "MODEL_CACHE_ROOT" "${data_root}/model-cache")
+    vllm_cache_root=$(get_env_value "VLLM_CACHE_ROOT" "${data_root}/vllm-cache")
+    prometheus_data_root=$(get_env_value "PROMETHEUS_DATA_ROOT" "${data_root}/prometheus")
+    grafana_data_root=$(get_env_value "GRAFANA_DATA_ROOT" "${data_root}/grafana")
+    loki_data_root=$(get_env_value "LOKI_DATA_ROOT" "${data_root}/loki")
+
+    mkdir -p \
+        "$data_root" \
+        "$log_root/nginx" \
+        "$model_cache_root" \
+        "$vllm_cache_root" \
+        "$prometheus_data_root" \
+        "$grafana_data_root" \
+        "$loki_data_root"
+
+    local model_id
+    model_id=$(grep -E '^MODEL_ID=' "$ENV_FILE" | cut -d= -f2- || true)
+    if [[ "$model_id" == *"/"* ]] && ! grep -qE '^HF_TOKEN=.+$' "$ENV_FILE"; then
+        warn "HF_TOKEN is not set in .env. Hugging Face model downloads may fail for gated repos."
+    fi
+
     log "Pre-flight checks passed"
 }
 
@@ -75,18 +113,24 @@ start() {
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d \
         prometheus grafana alertmanager loki promtail
 
-    log "Starting vLLM workers (this can take a few minutes while weights are loaded)..."
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d \
-        vllm-g0 vllm-g1 vllm-g2 vllm-g3 vllm-g4 vllm-g5 vllm-g6 vllm-g7
+    log "Starting vLLM cache warmer on GPU 0..."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate vllm-g0
+    wait_port_healthy 8000 "vllm-g0" 1800
+
+    log "Starting remaining vLLM workers (weights should now be cached)..."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate \
+        vllm-g1 vllm-g2 vllm-g3 vllm-g4 vllm-g5 vllm-g6 vllm-g7
 
     # Wait for health
     log "Waiting for instances to become healthy..."
-    wait_healthy 300
+    wait_healthy 900
 
     log "Starting nginx gateway..."
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d nginx nginx-exporter
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate nginx nginx-exporter
 
-    log "Stack is up! Endpoint: https://$(hostname -I | awk '{print $1}')/v1/"
+    local gateway_http_port
+    gateway_http_port=$(get_env_value "GATEWAY_HTTP_PORT" "$GATEWAY_HTTP_PORT_DEFAULT")
+    log "Stack is up! Internal gateway: http://127.0.0.1:${gateway_http_port}/v1/"
 }
 
 # ---- Stop ----
@@ -115,6 +159,31 @@ wait_healthy() {
     return 1
 }
 
+wait_port_healthy() {
+    local port=$1
+    local name=$2
+    local timeout=${3:-900}
+    local elapsed=0
+
+    while [ $elapsed -lt $timeout ]; do
+        if curl -sf "http://localhost:${port}/health" &>/dev/null; then
+            log "$name is healthy"
+            return 0
+        fi
+        if docker compose -f "$COMPOSE_FILE" ps --status exited --services 2>/dev/null | grep -qx "$name"; then
+            err "$name exited before becoming healthy"
+            docker compose -f "$COMPOSE_FILE" logs --tail=50 "$name" || true
+            return 1
+        fi
+        echo -ne "\r  waiting for $name on port $port (${elapsed}s elapsed)..."
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+
+    warn "Timeout waiting for $name to become healthy"
+    return 1
+}
+
 health() {
     echo "Instance Health:"
     echo "================"
@@ -136,7 +205,9 @@ health() {
     echo "Summary: $healthy healthy, $unhealthy unhealthy out of $TOTAL_INSTANCES"
 
     # Gateway check
-    if curl -sf "http://localhost/health" &>/dev/null; then
+    local gateway_http_port
+    gateway_http_port=$(get_env_value "GATEWAY_HTTP_PORT" "$GATEWAY_HTTP_PORT_DEFAULT")
+    if curl -sf "http://localhost:${gateway_http_port}/health" &>/dev/null; then
         echo -e "Gateway:    ${GREEN}✓${NC} healthy"
     else
         echo -e "Gateway:    ${RED}✗${NC} unhealthy"
