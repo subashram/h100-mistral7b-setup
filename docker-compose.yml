@@ -1,0 +1,355 @@
+# =============================================================================
+# Mistral 7B Production Stack — 8×H100, 24 vLLM instances
+# =============================================================================
+# Usage: docker compose --env-file .env up -d
+# =============================================================================
+
+version: "3.8"
+
+x-vllm-base: &vllm-base
+  image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
+  runtime: nvidia
+  restart: unless-stopped
+  ipc: host
+  shm_size: ${VLLM_SHM_SIZE:-4g}
+  ulimits:
+    memlock: -1
+    nofile:
+      soft: 65536
+      hard: 65536
+  volumes:
+    - model-cache:/root/.cache/huggingface
+    - /var/log/mistral:/var/log/vllm
+  command: >
+    --model ${MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
+    --dtype ${MODEL_DTYPE:-fp8}
+    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.30}
+    --max-model-len ${MAX_MODEL_LEN:-8192}
+    --enable-auto-tool-choice
+    --tool-call-parser mistral
+    --disable-log-requests
+    --uvicorn-log-level warning
+    --max-num-batched-tokens 8192
+    --enable-prefix-caching
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: ${HEALTH_CHECK_INTERVAL:-10s}
+    timeout: ${HEALTH_CHECK_TIMEOUT:-5s}
+    retries: ${HEALTH_CHECK_RETRIES:-3}
+    start_period: 120s
+  deploy:
+    resources:
+      limits:
+        cpus: "${VLLM_CPU_LIMIT:-4}"
+        memory: ${VLLM_MEM_LIMIT:-16g}
+
+services:
+  # ---------------------------------------------------------------------------
+  # GPU 0 — 3 instances (ports 8000-8002)
+  # ---------------------------------------------------------------------------
+  vllm-g0-i0:
+    <<: *vllm-base
+    container_name: vllm-g0-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - VLLM_INSTANCE_ID=g0-i0
+    ports: ["8000:8000"]
+
+  vllm-g0-i1:
+    <<: *vllm-base
+    container_name: vllm-g0-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - VLLM_INSTANCE_ID=g0-i1
+    ports: ["8001:8000"]
+
+  vllm-g0-i2:
+    <<: *vllm-base
+    container_name: vllm-g0-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - VLLM_INSTANCE_ID=g0-i2
+    ports: ["8002:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 1 — 3 instances (ports 8003-8005)
+  # ---------------------------------------------------------------------------
+  vllm-g1-i0:
+    <<: *vllm-base
+    container_name: vllm-g1-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - VLLM_INSTANCE_ID=g1-i0
+    ports: ["8003:8000"]
+
+  vllm-g1-i1:
+    <<: *vllm-base
+    container_name: vllm-g1-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - VLLM_INSTANCE_ID=g1-i1
+    ports: ["8004:8000"]
+
+  vllm-g1-i2:
+    <<: *vllm-base
+    container_name: vllm-g1-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=1
+      - VLLM_INSTANCE_ID=g1-i2
+    ports: ["8005:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 2 — 3 instances (ports 8006-8008)
+  # ---------------------------------------------------------------------------
+  vllm-g2-i0:
+    <<: *vllm-base
+    container_name: vllm-g2-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2
+      - VLLM_INSTANCE_ID=g2-i0
+    ports: ["8006:8000"]
+
+  vllm-g2-i1:
+    <<: *vllm-base
+    container_name: vllm-g2-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2
+      - VLLM_INSTANCE_ID=g2-i1
+    ports: ["8007:8000"]
+
+  vllm-g2-i2:
+    <<: *vllm-base
+    container_name: vllm-g2-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2
+      - VLLM_INSTANCE_ID=g2-i2
+    ports: ["8008:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 3 — 3 instances (ports 8009-8011)
+  # ---------------------------------------------------------------------------
+  vllm-g3-i0:
+    <<: *vllm-base
+    container_name: vllm-g3-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=3
+      - VLLM_INSTANCE_ID=g3-i0
+    ports: ["8009:8000"]
+
+  vllm-g3-i1:
+    <<: *vllm-base
+    container_name: vllm-g3-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=3
+      - VLLM_INSTANCE_ID=g3-i1
+    ports: ["8010:8000"]
+
+  vllm-g3-i2:
+    <<: *vllm-base
+    container_name: vllm-g3-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=3
+      - VLLM_INSTANCE_ID=g3-i2
+    ports: ["8011:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 4 — 3 instances (ports 8012-8014)
+  # ---------------------------------------------------------------------------
+  vllm-g4-i0:
+    <<: *vllm-base
+    container_name: vllm-g4-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=4
+      - VLLM_INSTANCE_ID=g4-i0
+    ports: ["8012:8000"]
+
+  vllm-g4-i1:
+    <<: *vllm-base
+    container_name: vllm-g4-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=4
+      - VLLM_INSTANCE_ID=g4-i1
+    ports: ["8013:8000"]
+
+  vllm-g4-i2:
+    <<: *vllm-base
+    container_name: vllm-g4-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=4
+      - VLLM_INSTANCE_ID=g4-i2
+    ports: ["8014:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 5 — 3 instances (ports 8015-8017)
+  # ---------------------------------------------------------------------------
+  vllm-g5-i0:
+    <<: *vllm-base
+    container_name: vllm-g5-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=5
+      - VLLM_INSTANCE_ID=g5-i0
+    ports: ["8015:8000"]
+
+  vllm-g5-i1:
+    <<: *vllm-base
+    container_name: vllm-g5-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=5
+      - VLLM_INSTANCE_ID=g5-i1
+    ports: ["8016:8000"]
+
+  vllm-g5-i2:
+    <<: *vllm-base
+    container_name: vllm-g5-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=5
+      - VLLM_INSTANCE_ID=g5-i2
+    ports: ["8017:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 6 — 3 instances (ports 8018-8020)
+  # ---------------------------------------------------------------------------
+  vllm-g6-i0:
+    <<: *vllm-base
+    container_name: vllm-g6-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=6
+      - VLLM_INSTANCE_ID=g6-i0
+    ports: ["8018:8000"]
+
+  vllm-g6-i1:
+    <<: *vllm-base
+    container_name: vllm-g6-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=6
+      - VLLM_INSTANCE_ID=g6-i1
+    ports: ["8019:8000"]
+
+  vllm-g6-i2:
+    <<: *vllm-base
+    container_name: vllm-g6-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=6
+      - VLLM_INSTANCE_ID=g6-i2
+    ports: ["8020:8000"]
+
+  # ---------------------------------------------------------------------------
+  # GPU 7 — 3 instances (ports 8021-8023)
+  # ---------------------------------------------------------------------------
+  vllm-g7-i0:
+    <<: *vllm-base
+    container_name: vllm-g7-i0
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=7
+      - VLLM_INSTANCE_ID=g7-i0
+    ports: ["8021:8000"]
+
+  vllm-g7-i1:
+    <<: *vllm-base
+    container_name: vllm-g7-i1
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=7
+      - VLLM_INSTANCE_ID=g7-i1
+    ports: ["8022:8000"]
+
+  vllm-g7-i2:
+    <<: *vllm-base
+    container_name: vllm-g7-i2
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=7
+      - VLLM_INSTANCE_ID=g7-i2
+    ports: ["8023:8000"]
+
+  # ---------------------------------------------------------------------------
+  # API Gateway — Nginx
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mistral-gateway
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/api_keys.conf:/etc/nginx/api_keys.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - /var/log/mistral/nginx:/var/log/nginx
+    depends_on:
+      vllm-g0-i0: { condition: service_healthy }
+      vllm-g1-i0: { condition: service_healthy }
+      vllm-g2-i0: { condition: service_healthy }
+      vllm-g3-i0: { condition: service_healthy }
+      vllm-g4-i0: { condition: service_healthy }
+      vllm-g5-i0: { condition: service_healthy }
+      vllm-g6-i0: { condition: service_healthy }
+      vllm-g7-i0: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Monitoring
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: mistral-prometheus
+    restart: unless-stopped
+    ports: ["9090:9090"]
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: mistral-grafana
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: mistral-alertmanager
+    restart: unless-stopped
+    ports: ["9093:9093"]
+    volumes:
+      - ./monitoring/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+
+  # ---------------------------------------------------------------------------
+  # Log aggregation (optional — Loki + Promtail)
+  # ---------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: mistral-loki
+    restart: unless-stopped
+    ports: ["3100:3100"]
+    volumes:
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: mistral-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/log/mistral:/var/log/mistral:ro
+      - ./monitoring/promtail.yml:/etc/promtail/config.yml:ro
+
+volumes:
+  model-cache:
+    driver: local
+  prometheus-data:
+  grafana-data:
+  loki-data:

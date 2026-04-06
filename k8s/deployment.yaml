@@ -1,0 +1,230 @@
+# =============================================================================
+# Kubernetes Alternative — Mistral 7B on 8×H100
+# Apply: kubectl apply -f k8s/
+# =============================================================================
+
+# --- Namespace ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mistral-prod
+  labels:
+    app: mistral-7b
+
+---
+# --- ConfigMap ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-config
+  namespace: mistral-prod
+data:
+  MODEL_ID: "mistralai/Mistral-7B-Instruct-v0.3"
+  MODEL_DTYPE: "fp8"
+  MAX_MODEL_LEN: "8192"
+  GPU_MEMORY_UTILIZATION: "0.30"
+
+---
+# --- Deployment ---
+# Uses NVIDIA GPU time-slicing (configure via gpu-operator ClusterPolicy)
+# to run 3 pods per GPU = 24 pods across 8 GPUs
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mistral-7b
+  namespace: mistral-prod
+spec:
+  replicas: 24
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 3       # one GPU pool at a time
+      maxSurge: 3
+  selector:
+    matchLabels:
+      app: mistral-7b
+  template:
+    metadata:
+      labels:
+        app: mistral-7b
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: vllm
+        image: vllm/vllm-openai:latest
+        args:
+          - "--model=$(MODEL_ID)"
+          - "--dtype=$(MODEL_DTYPE)"
+          - "--gpu-memory-utilization=$(GPU_MEMORY_UTILIZATION)"
+          - "--max-model-len=$(MAX_MODEL_LEN)"
+          - "--enable-auto-tool-choice"
+          - "--tool-call-parser=mistral"
+          - "--disable-log-requests"
+          - "--enable-prefix-caching"
+          - "--max-num-batched-tokens=8192"
+        envFrom:
+          - configMapRef:
+              name: vllm-config
+        ports:
+        - name: http
+          containerPort: 8000
+        resources:
+          requests:
+            cpu: "2"
+            memory: "12Gi"
+            nvidia.com/gpu: "1"    # fractional via time-slicing
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 180
+          periodSeconds: 30
+          failureThreshold: 5
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          failureThreshold: 30    # 5 min total startup budget
+        volumeMounts:
+        - name: model-cache
+          mountPath: /root/.cache/huggingface
+        - name: shm
+          mountPath: /dev/shm
+      volumes:
+      - name: model-cache
+        persistentVolumeClaim:
+          claimName: model-cache-pvc
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 4Gi
+
+---
+# --- PVC for model cache ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-cache-pvc
+  namespace: mistral-prod
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: fast-ssd        # adjust to your cluster
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+# --- Service ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mistral-7b
+  namespace: mistral-prod
+  labels:
+    app: mistral-7b
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: mistral-7b
+
+---
+# --- HPA (autoscale on queue depth) ---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mistral-7b-hpa
+  namespace: mistral-prod
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mistral-7b
+  minReplicas: 8
+  maxReplicas: 40
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Pods
+        value: 4
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 120
+  metrics:
+  - type: Pods
+    pods:
+      metric:
+        name: vllm_num_requests_waiting
+      target:
+        type: AverageValue
+        averageValue: "10"
+
+---
+# --- Ingress ---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mistral-7b
+  namespace: mistral-prod
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/limit-rps: "200"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - mistral.yourcompany.com
+    secretName: mistral-tls
+  rules:
+  - host: mistral.yourcompany.com
+    http:
+      paths:
+      - path: /v1
+        pathType: Prefix
+        backend:
+          service:
+            name: mistral-7b
+            port:
+              number: 80
+
+---
+# --- PodDisruptionBudget ---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mistral-7b-pdb
+  namespace: mistral-prod
+spec:
+  minAvailable: 16                  # at least 16/24 pods during disruption
+  selector:
+    matchLabels:
+      app: mistral-7b

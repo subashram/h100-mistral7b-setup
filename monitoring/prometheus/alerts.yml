@@ -1,0 +1,99 @@
+groups:
+  - name: vllm_critical
+    rules:
+      # Instance down for > 2 minutes
+      - alert: VLLMInstanceDown
+        expr: up{job="vllm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "vLLM instance {{ $labels.instance }} is down"
+          description: "Instance has been unreachable for > 2 minutes."
+
+      # All instances on a GPU are down
+      - alert: VLLMGPUPoolDown
+        expr: |
+          count by (gpu) (up{job="vllm"} == 0) == 3
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All vLLM instances on GPU pool are down"
+
+      # High error rate (> 5% of requests returning 5xx)
+      - alert: VLLMHighErrorRate
+        expr: |
+          rate(vllm:num_requests_total{status=~"5.."}[5m])
+          / rate(vllm:num_requests_total[5m]) > 0.05
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.instance }}"
+          description: "More than 5% of requests are failing."
+
+  - name: vllm_warning
+    rules:
+      # Request queue building up (> 20 waiting)
+      - alert: VLLMHighQueueDepth
+        expr: vllm:num_requests_waiting > 20
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High queue depth on {{ $labels.instance }}"
+          description: "{{ $value }} requests waiting — consider scaling."
+
+      # KV cache > 90% — risk of OOM or request rejection
+      - alert: VLLMKVCachePressure
+        expr: vllm:gpu_cache_usage_perc > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "KV cache > 90% on {{ $labels.instance }}"
+          description: "Reduce max_model_len or add instances."
+
+      # P95 latency > 5s for time-to-first-token
+      - alert: VLLMHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(vllm:e2e_request_latency_seconds_bucket[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 latency > 5s on {{ $labels.instance }}"
+
+      # Throughput dropped significantly
+      - alert: VLLMThroughputDrop
+        expr: |
+          vllm:avg_generation_throughput_toks_per_s < 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low throughput on {{ $labels.instance }}"
+          description: "Generation throughput has dropped below 50 tok/s."
+
+  - name: infrastructure
+    rules:
+      # GPU temperature > 85°C (if dcgm-exporter is running)
+      - alert: GPUHighTemperature
+        expr: DCGM_FI_DEV_GPU_TEMP > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU {{ $labels.gpu }} temperature is {{ $value }}°C"
+
+      # GPU memory utilization > 95%
+      - alert: GPUMemoryHigh
+        expr: DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU {{ $labels.gpu }} memory > 95%"
