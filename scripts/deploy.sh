@@ -111,7 +111,7 @@ start() {
 
     # Start monitoring first, then vLLM instances
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d \
-        prometheus grafana alertmanager loki promtail
+        prometheus grafana alertmanager loki promtail dcgm-exporter
 
     log "Starting vLLM cache warmer on GPU 0..."
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate vllm-g0
