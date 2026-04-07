@@ -181,6 +181,31 @@ http://127.0.0.1:8081
 
 This keeps public ports on the host while the app gateway stays internal to the machine.
 
+Ingress is intentionally split into two tiers:
+
+- host `nginx`
+  Purpose: public entrypoint, host TLS, public `80/443`, and firewall-facing exposure control
+- container `nginx`
+  Purpose: API-key auth, rate limiting, request routing, upstream balancing, metrics, and structured gateway logs
+
+The recommended operating model is:
+
+- host `nginx` is the only internet-facing listener
+- container `nginx` stays private on `127.0.0.1:8081/8443`
+- vLLM workers stay behind the container gateway on the Docker network
+
+The recommended host frontend config is included in the repo at:
+
+- `nginx/host-public-nginx.conf.example`
+
+It is intended to be copied to the host, adapted for the final hostname and certificate paths, then enabled with:
+
+```bash
+sudo cp nginx/host-public-nginx.conf.example /etc/nginx/conf.d/mistral.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 ## Host TLS Follow-up
 
 The intended final state is for host `nginx` to terminate TLS on public `443` and proxy to the internal gateway on `127.0.0.1:8081`.
@@ -205,6 +230,13 @@ Recommended final pattern:
 - host `443` terminates TLS
 - host `443` proxies to `127.0.0.1:8081`
 - the containerized gateway remains internal-only on `127.0.0.1:8081/8443`
+
+Recommended supporting settings:
+
+- keep `.env` at `GATEWAY_BIND_HOST=127.0.0.1`
+- keep Docker port publishing on `127.0.0.1:8081:8081` and `127.0.0.1:8443:8443`
+- expose only host `80/443` publicly
+- do not expose `8081/8443` directly through the cloud firewall
 
 ## Known Follow-ups
 

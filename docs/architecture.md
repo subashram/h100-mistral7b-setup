@@ -34,6 +34,38 @@ flowchart TD
 - Heavy persistent state lives under `/mnt/compass/mistral`.
 - App code and deployment config live under `/opt/compass/mistral`.
 
+## Two-Tier Nginx Model
+
+This stack intentionally uses two separate `nginx` layers.
+
+### Host Nginx
+
+Responsibilities:
+
+- public listener on `80/443`
+- host-level TLS certificate and key management
+- public `80 -> 443` redirect
+- exposure control so only host `80/443` need to be opened in the firewall
+
+### Container Gateway Nginx
+
+Responsibilities:
+
+- OpenAI-compatible API gateway inside the stack
+- API-key authentication
+- gateway rate limiting and basic ingress protection
+- request ID injection and structured JSON access logs
+- balancing across the eight `vLLM` workers
+- worker-facing health, metrics, and gateway-specific operational endpoints
+
+### Why Keep Them Separate
+
+- public ingress and TLS lifecycle can change without changing the inference gateway
+- the model-serving layer stays private on `127.0.0.1`
+- app-specific gateway policy stays versioned with the repo
+- the blast radius is smaller if the public frontend needs emergency changes
+- operators can reason separately about network exposure and inference behavior
+
 ## Runtime Layout
 
 - `/opt/compass/mistral`

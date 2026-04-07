@@ -23,10 +23,20 @@ On hosts that already run a system `nginx`, the recommended pattern is:
 - bind the containerized Mistral gateway to `127.0.0.1:8081/8443`
 - let the host `nginx` reverse-proxy into the internal gateway
 
+This creates a deliberate two-tier ingress model:
+
+- host `nginx`
+  Purpose: public entrypoint, host-level TLS termination, and exposure control for only `80/443`
+- container `nginx` gateway
+  Purpose: API-key auth, request shaping, request logging, worker load balancing, and inference-specific routing inside the stack
+
+That split keeps public networking concerns separate from model-serving concerns.
+
 Current status:
 
 - host `nginx` HTTP proxy on `80` is in place
 - host-side TLS on `443` is still a follow-up item and is documented in [Deployment](docs/deployment.md) and [Operations](docs/operations.md)
+- a ready-to-use host frontend example is in [nginx/host-public-nginx.conf.example](nginx/host-public-nginx.conf.example)
 
 ## Architecture Overview
 
@@ -57,6 +67,22 @@ flowchart TD
 - `1 worker per GPU` is the cleanest baseline for aggregate multi-user throughput and operational isolation.
 - A single unhealthy worker only costs `1/8` of capacity and is easy to replace during a rolling update.
 - Treat `2 workers per GPU` as an experiment only after benchmarking realistic traffic.
+
+## Two-Tier Ingress
+
+This deployment uses two separate `nginx` layers on purpose.
+
+- host `nginx`
+  Role: internet-facing frontend on public `80/443`
+- container `nginx`
+  Role: internal API gateway for the Mistral stack
+
+Why both exist:
+
+- the host layer owns public exposure, host certificates, and the clean `80 -> 443` redirect
+- the container layer owns app-specific behavior like API keys, gateway throttling, upstream retries, structured logs, and balancing across `vllm-g0` through `vllm-g7`
+- keeping them separate makes it easier to change public TLS or firewall posture without rewriting the inference gateway
+- it also reduces the chance of accidentally exposing internal worker paths or ports directly
 
 ## Prerequisites
 
