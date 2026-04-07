@@ -12,6 +12,7 @@ The baseline goal is production-grade multi-user inference with tool/function ca
 Additional documentation:
 
 - [Architecture](docs/architecture.md)
+- [Benchmarking](docs/benchmarking.md)
 - [Deployment](docs/deployment.md)
 - [Operations](docs/operations.md)
 - [Monitoring](docs/monitoring.md)
@@ -227,6 +228,42 @@ Useful validation commands:
 TEST_MODE=tools ./scripts/api-test.sh
 ENDPOINT=http://127.0.0.1:8081/v1 ./scripts/api-test.sh
 ```
+
+## Router Handoff
+
+For upstream routing teams, expose this service as an OpenAI-compatible API.
+
+Expected interface:
+
+- Base URL: `https://<public-host>/v1`
+- Chat completions: `POST /v1/chat/completions`
+- Models: `GET /v1/models`
+- Health: `GET /health`
+
+Authentication uses a standard bearer token:
+
+```http
+Authorization: Bearer <API_KEY>
+```
+
+Example request:
+
+```bash
+curl https://<public-host>/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <API_KEY>' \
+  -d '{
+    "model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+Current note:
+
+- The router-facing public `443` endpoint is still pending final host TLS and cloud firewall setup.
+- The internal working gateway for local validation is `https://127.0.0.1:8443/v1` on the box, or `https://127.0.0.1:18443/v1` through the SSH tunnel.
 
 What the deploy script does:
 

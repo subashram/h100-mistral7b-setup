@@ -46,4 +46,4 @@ scrape_configs:
 
   - job_name: "nvidia-gpu"
     static_configs:
-      - targets: ["host.docker.internal:9400"]  # nvidia dcgm-exporter on the Docker host
+      - targets: ["dcgm-exporter:9400"]

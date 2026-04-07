@@ -14,10 +14,18 @@ REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-180}"
 TEST_MODE="${TEST_MODE:-chat}"          # chat | stream | tools
 PROMPT="${PROMPT:-Explain batching in one short paragraph.}"
 INSECURE_TLS="${INSECURE_TLS:-1}"
+KEEP_TMP_DIR="${KEEP_TMP_DIR:-0}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+cleanup() {
+    if [ "$KEEP_TMP_DIR" = "1" ]; then
+        echo "Preserving benchmark artifacts in $TMP_DIR"
+    else
+        rm -rf "$TMP_DIR"
+    fi
+}
+trap cleanup EXIT
 
 log()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $1"; }
@@ -69,6 +77,7 @@ EOF
   "messages": [
     {"role":"user","content":"What is the weather in Dallas for request $request_id?"}
   ],
+  "temperature": 0,
   "max_tokens": $MAX_TOKENS,
   "tools": [{
     "type": "function",
@@ -83,7 +92,8 @@ EOF
         "required": ["location"]
       }
     }
-  }]
+  }],
+  "tool_choice": "auto"
 }
 EOF
             ;;
@@ -113,6 +123,8 @@ run_one() {
     local request_id="$1"
     local body_file="$TMP_DIR/$request_id.body"
     local meta_file="$TMP_DIR/$request_id.meta"
+    local ok_file="$TMP_DIR/$request_id.ok"
+    local fail_file="$TMP_DIR/$request_id.fail"
     local curl_flags=(-sS --max-time "$REQUEST_TIMEOUT")
 
     if [ "$INSECURE_TLS" = "1" ]; then
@@ -137,11 +149,46 @@ run_one() {
     local http_code latency size_download
     read -r http_code latency size_download < "$meta_file"
 
-    if [ "$http_code" = "200" ] && request_ok "$body_file"; then
-        echo "$latency" > "$TMP_DIR/$request_id.ok"
-    else
-        echo "$http_code $latency $size_download" > "$TMP_DIR/$request_id.fail"
+    rm -f "$ok_file" "$fail_file"
+
+    if [ "$http_code" = "200" ]; then
+        if request_ok "$body_file"; then
+            printf "%s\n" "$latency" > "$ok_file"
+            return 0
+        fi
     fi
+
+    printf "%s %s %s\n" "$http_code" "$latency" "$size_download" > "$fail_file"
+    return 0
+}
+
+summarize_count() {
+    local pattern="$1"
+    find "$TMP_DIR" -name "$pattern" -print | wc -l | tr -d ' '
+}
+
+collect_latency_files() {
+    find "$TMP_DIR" -name '*.ok' -exec cat {} \; | sort -n > "$TMP_DIR/latencies.txt"
+}
+
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+run_benchmark() {
+    BENCHMARK_START="$(date +%s)"
+
+    export ENDPOINT API_KEY MODEL TOTAL_REQUESTS CONCURRENCY MAX_TOKENS REQUEST_TIMEOUT TEST_MODE PROMPT INSECURE_TLS TMP_DIR
+    export -f build_payload request_ok run_one
+
+    seq 1 "$TOTAL_REQUESTS" | xargs -n 1 -P "$CONCURRENCY" -I '{}' bash -lc 'run_one "$1"' _ '{}'
+
+    BENCHMARK_END="$(date +%s)"
+    ELAPSED=$((BENCHMARK_END - BENCHMARK_START))
+    [ "$ELAPSED" -eq 0 ] && ELAPSED=1
+
+    SUCCESS_COUNT="$(summarize_count '*.ok')"
+    FAIL_COUNT="$(summarize_count '*.fail')"
+    collect_latency_files
 }
 
 require_int "TOTAL_REQUESTS" "$TOTAL_REQUESTS"
@@ -163,26 +210,7 @@ echo "Max tokens:    $MAX_TOKENS"
 echo "Timeout (s):   $REQUEST_TIMEOUT"
 echo ""
 
-BENCHMARK_START="$(date +%s)"
-
-for request_id in $(seq 1 "$TOTAL_REQUESTS"); do
-    while [ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$CONCURRENCY" ]; do
-        sleep 0.1
-    done
-
-    run_one "$request_id" &
-done
-
-wait
-
-BENCHMARK_END="$(date +%s)"
-ELAPSED=$((BENCHMARK_END - BENCHMARK_START))
-[ "$ELAPSED" -eq 0 ] && ELAPSED=1
-
-SUCCESS_COUNT=$(find "$TMP_DIR" -name '*.ok' | wc -l | tr -d ' ')
-FAIL_COUNT=$(find "$TMP_DIR" -name '*.fail' | wc -l | tr -d ' ')
-
-find "$TMP_DIR" -name '*.ok' -exec cat {} \; | sort -n > "$TMP_DIR/latencies.txt"
+run_benchmark
 
 if [ -s "$TMP_DIR/latencies.txt" ]; then
     AVG_LATENCY=$(awk '{sum+=$1} END {printf "%.3f", sum/NR}' "$TMP_DIR/latencies.txt")

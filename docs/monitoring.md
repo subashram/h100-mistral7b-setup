@@ -29,16 +29,18 @@ Recommended access is via SSH tunnel, not public exposure.
 
 - `vLLM` worker metrics from each worker’s `/metrics`
 - Nginx exporter metrics from the internal gateway
-- optional host GPU metrics from DCGM exporter at `host.docker.internal:9400`
+- DCGM GPU metrics from the `dcgm-exporter` service
 
 ## What To Verify In Grafana
 
 - request throughput
 - latency
 - worker availability
-- error rate
+- request rate
 - queue-related pressure
-- GPU memory usage and saturation if DCGM exporter is enabled
+- GPU utilization
+- GPU memory usage and saturation
+- GPU power and temperature
 
 ## Alerts
 

@@ -98,6 +98,79 @@ Typical internal endpoint:
 ENDPOINT=http://127.0.0.1:8081/v1 ./scripts/api-test.sh
 ```
 
+## Router Handoff
+
+The service is intended to be consumed as an OpenAI-compatible endpoint behind an upstream router.
+
+Router teams should receive:
+
+- Base URL: `https://<public-host>/v1`
+- Auth header: `Authorization: Bearer <API_KEY>`
+- Health check path: `GET /health`
+- Model name: `mistralai/Mistral-7B-Instruct-v0.3`
+- Gateway timeout profile:
+  - read timeout: `300s`
+  - send timeout: `300s`
+- Retry behavior on upstream failure:
+  - retry on `error`, `timeout`, `502`, `503`
+  - up to `3` upstream tries
+  - retry window: `10s`
+
+Primary API paths:
+
+- `POST /v1/chat/completions`
+- `GET /v1/models`
+
+Example request:
+
+```bash
+curl https://<public-host>/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <API_KEY>' \
+  -d '{
+    "model": "mistralai/Mistral-7B-Instruct-v0.3",
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ]
+  }'
+```
+
+Current status:
+
+- Internal gateway: `https://127.0.0.1:8443/v1`
+- SSH-tunneled gateway from an operator workstation: `https://127.0.0.1:18443/v1`
+- Final public `443` endpoint still depends on host TLS and firewall completion
+
+## Current Gateway Safeguards
+
+Current Nginx gateway behavior:
+
+- API key authentication is required on `/v1/`
+- global request limiting is enabled per client IP
+  - sustained rate: `200 r/s`
+  - burst: `100`
+  - limit response: `429`
+- no per-API-key rate limit is enabled right now
+- request body limit: `10m`
+- streaming responses are supported with proxy buffering disabled
+- request IDs are added with `X-Request-ID`
+- upstream selection uses `least_conn`
+
+Why this matters for integration:
+
+- shared test keys will not be throttled just because many requests use the same key
+- upstream routers can still do user-, tenant-, or key-level policy separately
+- this gateway still protects the box from obvious edge floods
+
+Feedback needed from the integration team:
+
+- expected steady-state requests/sec
+- expected burst profile
+- expected prompt and output sizes
+- whether upstream retries are enabled
+- whether upstream already enforces per-user or per-key rate limits
+- target timeout/SLA expectations
+
 ## Host nginx Integration
 
 The host `nginx` currently proxies public HTTP traffic to:

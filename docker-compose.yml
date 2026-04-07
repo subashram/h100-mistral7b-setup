@@ -28,8 +28,12 @@ x-vllm-base: &vllm-base
     --dtype ${MODEL_DTYPE:-bfloat16}
     --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.90}
     --max-model-len ${MAX_MODEL_LEN:-8192}
+    --tokenizer_mode ${TOKENIZER_MODE:-hf}
+    --config_format ${CONFIG_FORMAT:-hf}
+    --load_format ${LOAD_FORMAT:-hf}
     --enable-auto-tool-choice
     --tool-call-parser mistral
+    --chat-template ${CHAT_TEMPLATE:-/vllm-workspace/examples/tool_chat_template_mistral_parallel.jinja}
     --uvicorn-log-level warning
     --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-16384}
     --max-num-seqs ${MAX_NUM_SEQS:-256}
@@ -196,6 +200,15 @@ services:
     depends_on:
       nginx:
         condition: service_started
+
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+    container_name: mistral-dcgm-exporter
+    restart: unless-stopped
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    ports: ["9400:9400"]
 
   promtail:
     image: grafana/promtail:2.9.0
