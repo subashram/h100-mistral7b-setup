@@ -295,7 +295,7 @@ ssh -i ~/.ssh/id_ed25519_compass_mistral \
   -L 9090:localhost:9090 \
   -L 9093:localhost:9093 \
   -L 3100:localhost:3100 \
-  compass@20.174.12.45
+  compass@<h100-server-ip>
 ```
 
 Then open:
@@ -345,6 +345,22 @@ The script reports:
 - average latency
 - p50 latency
 - p95 latency
+
+Current measured baseline on the dedicated `8x H100 80GB` node:
+
+| Workload | Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| Chat, `MAX_TOKENS=64` | `600` | `64` | `100%` | `50.00` | `1.114s` | `1.472s` |
+| Chat, `MAX_TOKENS=256` | `400` | `32` | `100%` | `22.22` | `1.425s` | `1.718s` |
+| Stream, `MAX_TOKENS=128` | `200` | `24` | `100%` | `15.38` | `1.435s` | `1.995s` |
+| Tools, `MAX_TOKENS=128` | `200` | `32` | `100%` | `33.33` | `0.879s` | `1.274s` |
+| Soak, chat `MAX_TOKENS=128` | `15000` | `32` | `100%` | `23.40` | `1.346s` | `1.479s` |
+
+Notes:
+
+- the soak run lasted about `10.7` minutes with queue depth staying at `0`
+- tool-calling results only apply after the current Mistral parser and chat-template fix in this repo
+- full benchmark context and comparison guidance live in [Benchmarking](docs/benchmarking.md)
 
 ## First Benchmark Matrix
 

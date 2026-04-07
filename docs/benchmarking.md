@@ -1,6 +1,6 @@
 # Benchmarking
 
-This document captures the benchmark style used for this deployment and the current measured baseline on the dedicated `8x H100 80GB` node.
+This document captures the benchmark style used for this deployment and the current measured baseline on the dedicated `8x H100 80GB` node. It is meant to be detailed enough that another team can compare their own results against the same topology and request shape.
 
 ## Standard Metrics
 
@@ -44,14 +44,45 @@ Pair benchmark runs with Grafana and Prometheus for:
 - GPU memory used
 - GPU power and temperature
 
-## Current Baseline
+## Test Environment
 
-These runs were taken against the working internal HTTPS gateway with:
+These benchmark results were taken on:
 
+- hardware: `8x NVIDIA H100 80GB HBM3`
+- serving topology: `8` vLLM workers, `1` worker per GPU
 - model: `mistralai/Mistral-7B-Instruct-v0.3`
-- topology: `8` workers, `1` worker per GPU
-- workload shape: short chat requests
-- `MAX_TOKENS=64`
+- dtype: `bfloat16`
+- gateway: `nginx` reverse proxy with bearer-token auth
+- vLLM baseline tuning:
+  - `GPU_MEMORY_UTILIZATION=0.90`
+  - `MAX_MODEL_LEN=8192`
+  - `MAX_NUM_BATCHED_TOKENS=16384`
+  - `MAX_NUM_SEQS=256`
+
+Unless otherwise noted, runs were sent to the internal HTTPS gateway and observed with the Grafana dashboard plus Prometheus metrics.
+
+## Comparison Rules
+
+When comparing another deployment to these results, try to keep these factors aligned:
+
+- same model and model revision
+- same worker topology
+- same prompt style and approximate prompt length
+- same `MAX_TOKENS`
+- same concurrency
+- same request mode: `chat`, `stream`, or `tools`
+
+If those differ, the results are still useful, but they are no longer an apples-to-apples comparison.
+
+## Benchmark Results
+
+### Short Chat Baseline
+
+Workload shape:
+
+- request mode: `chat`
+- prompt style: short single-turn prompt
+- output cap: `MAX_TOKENS=64`
 
 Measured results:
 
@@ -66,6 +97,97 @@ Interpretation:
 - the current stack is stable through at least `64` concurrent short chat requests
 - the gateway is no longer the limiting factor for this test shape
 - this is still a short-output benchmark, not a worst-case long-context result
+
+### Longer Output Chat
+
+Workload shape:
+
+- request mode: `chat`
+- prompt style: short single-turn prompt
+- output cap: `MAX_TOKENS=256`
+
+Measured results:
+
+| Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency | Notes |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `400` | `32` | `100%` | `22.22` | `1.425s` | `1.718s` | queue stayed `0` |
+
+Interpretation:
+
+- increasing output length reduced throughput as expected
+- latency stayed well-behaved with no queue growth
+- this is a better comparison point than the short chat baseline for integrations expecting larger responses
+
+### Streaming
+
+Workload shape:
+
+- request mode: `stream`
+- prompt style: short single-turn prompt
+- output cap: `MAX_TOKENS=128`
+
+Measured results:
+
+| Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency | Notes |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `200` | `24` | `100%` | `15.38` | `1.435s` | `1.995s` | queue stayed `0` |
+
+Interpretation:
+
+- streaming remained stable under moderate concurrency
+- p95 was higher than short-form chat, which is expected because the request stays open while tokens are emitted
+
+### Tool Calling
+
+Workload shape:
+
+- request mode: `tools`
+- tool schema: simple weather-style test function
+- output cap: `MAX_TOKENS=128`
+
+Important note:
+
+- early tool-calling benchmark failures were caused by an output-format mismatch in the Mistral tool path, not by hardware or gateway capacity
+- valid tool-calling results only apply after enabling the current vLLM Mistral parser and chat-template settings
+
+Measured results after the fix:
+
+| Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency | Notes |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `200` | `24` | `100%` | `25.00` | `0.843s` | `1.067s` | post-fix run |
+| `200` | `32` | `100%` | `33.33` | `0.879s` | `1.274s` | post-fix run |
+
+Interpretation:
+
+- the tool-calling path is now stable under concurrency
+- the fixed configuration should be preserved when comparing future tool benchmarks
+
+### Sustained Chat Run
+
+Workload shape:
+
+- request mode: `chat`
+- prompt style: short single-turn prompt
+- output cap: `MAX_TOKENS=128`
+- duration target: multi-minute soak
+
+Measured result:
+
+| Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P50 Latency | P95 Latency | Wall Time | Notes |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `15000` | `32` | `100%` | `23.40` | `1.346s` | `1.350s` | `1.479s` | `641s` | about `10.7` minutes, queue stayed `0` |
+
+Observed checkpoints during the soak:
+
+- about `2` minutes: queue `0`, running requests `17`, generation throughput about `1042 tok/s`
+- about `5` minutes: queue `0`, running requests `14`, generation throughput about `2596 tok/s`
+- about `8` minutes: queue `0`, running requests `14`, generation throughput about `2577 tok/s`
+
+Interpretation:
+
+- the stack sustained a real multi-minute workload without queue buildup or errors
+- latency stayed stable through the soak
+- temperatures, GPU memory, and request distribution remained healthy in Grafana
 
 ## What To Publish
 
@@ -85,15 +207,39 @@ When sharing capacity externally, include:
 
 Do not publish only one number like “this box does X TPS” without the workload shape.
 
+A concise publishable summary for this deployment is:
+
+- `Mistral-7B-Instruct-v0.3`
+- `8x H100 80GB`
+- `8` vLLM workers, `1` per GPU
+- short chat benchmark:
+  - `600 req @ concurrency 64`
+  - `100%` success
+  - `50.00 req/s`
+  - `1.114s` average latency
+  - `1.472s` p95 latency
+- sustained chat benchmark:
+  - `15000 req @ concurrency 32`
+  - `100%` success
+  - `23.40 req/s`
+  - `1.346s` average latency
+  - `1.479s` p95 latency
+- tool benchmark after parser/template fix:
+  - `200 req @ concurrency 32`
+  - `100%` success
+  - `33.33 req/s`
+  - `0.879s` average latency
+  - `1.274s` p95 latency
+
 ## Recommended Next Runs
 
 To make the benchmark story stronger, add:
 
-1. `TEST_MODE=tools` at `24` and `32` concurrency
-2. `TEST_MODE=stream` at `24` and `32` concurrency
-3. longer-output runs with `MAX_TOKENS=256`
-4. larger prompt-size tests
-5. a sustained run long enough to observe thermal and steady-state behavior
+1. larger prompt-size tests
+2. larger tool schemas that match real integration payloads
+3. mixed request-type runs with `chat`, `stream`, and `tools` together
+4. retry-behavior testing with the upstream router in the loop
+5. longer soaks at higher concurrency or higher output caps
 
 ## Integration Notes
 

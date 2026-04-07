@@ -104,7 +104,7 @@ ssh -i ~/.ssh/id_ed25519_compass_mistral \
   -L 9090:localhost:9090 \
   -L 9093:localhost:9093 \
   -L 3100:localhost:3100 \
-  compass@20.174.12.45
+  compass@<h100-server-ip>
 ```
 
 Then open:
