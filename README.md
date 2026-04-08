@@ -235,6 +235,25 @@ Before first deployment, review:
 - `nginx/certs/server.key`
 - `monitoring/prometheus/alertmanager.yml` for Slack/email routing
 
+## Auth Source Of Truth
+
+Bearer-token auth currently lives in:
+
+- `nginx/api_keys.conf`
+
+That file is included directly by the lane gateways and is the active source of truth for request authorization.
+
+Important note:
+
+- `.env` may still contain an `API_KEYS` variable
+- that variable is currently only a legacy placeholder
+- it is not the authoritative gateway auth source in the current deployment
+
+Operational rule:
+
+- back up and rotate API keys in `nginx/api_keys.conf`
+- do not assume saving `.env` preserves the live auth state
+
 ## Operational Flow
 
 Common commands:

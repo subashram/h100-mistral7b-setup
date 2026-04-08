@@ -67,7 +67,13 @@ Current baseline values:
 - GPU placement:
   - `Mistral`: GPUs `0-1`
   - spare: GPUs `2-3`
-  - `Small32`: GPUs `4-7`
+- `Small32`: GPUs `4-7`
+
+Auth source of truth:
+
+- active bearer-token auth lives in `nginx/api_keys.conf`
+- `.env` may still contain `API_KEYS`, but that variable is not currently the authoritative gateway auth source
+- before redeploying, preserve both `.env` and `nginx/api_keys.conf`
 
 ## Start Sequence
 
@@ -229,6 +235,14 @@ Why this matters for integration:
 - shared test keys will not be throttled just because many requests use the same key
 - upstream routers can still do user-, tenant-, or key-level policy separately
 - this gateway still protects the box from obvious edge floods
+
+## Backlog
+
+Auth configuration cleanup to do in a later code change:
+
+- remove the misleading duplicate key path between `.env` and `nginx/api_keys.conf`
+- keep `nginx/api_keys.conf` as the only source of truth for gateway auth
+- remove or retire the legacy `API_KEYS` placeholder from `.env` once the migration is complete
 
 Feedback needed from the integration team:
 
