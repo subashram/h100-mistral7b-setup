@@ -22,6 +22,8 @@ Measured results on the live box:
 | `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `600` | `32` | `100%` | `46.15` | `0.632s` | `0.715s` | stable baseline |
 | `Mistral Small 3.2` | tools, `MAX_TOKENS=128` | `200` | `12` | `100%` | `33.33` | `0.270s` | `0.387s` | tool calling stable |
 | `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `600` | `48` | `100%` | `60.00` | `0.683s` | `0.785s` | still healthy |
+| `Mistral Small 3.2` | tools, `MAX_TOKENS=128` | `400` | `32` | `100%` | `80.00` | `0.367s` | `0.490s` | stronger tool benchmark |
+| `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `800` | `96` | `100%` | `114.29` | `0.820s` | `0.987s` | higher-concurrency chat |
 
 Operational note:
 

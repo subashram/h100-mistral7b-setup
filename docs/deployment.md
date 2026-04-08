@@ -185,6 +185,45 @@ URI routing behavior:
 - `/mistral/small32/v1` explicitly routes to the `Mistral Small 3.2` lane
 - the `/v1` alias can be switched later without changing the explicit paths
 
+## Changing The Default Route
+
+If you want `/v1` to point somewhere else, edit:
+
+- `nginx/router-gateway.conf`
+
+The router keeps explicit routes stable and uses `/v1` only as a default alias.
+
+Current default:
+
+```nginx
+location /v1/ {
+    proxy_pass http://mistral_lane/v1/;
+    ...
+}
+```
+
+To move the default alias to `Mistral Small 3.2`:
+
+```nginx
+location /v1/ {
+    proxy_pass http://small32_lane/v1/;
+    ...
+}
+```
+
+Then reload only the router layer:
+
+```bash
+docker compose up -d --force-recreate --no-deps nginx-router
+./scripts/deploy.sh health
+```
+
+Recommended rule:
+
+- keep the explicit namespaced routes stable
+- only change `/v1` when you want to shift the default integration target
+- avoid changing model names, gateway names, and URI aliases all at once
+
 Why this matters for integration:
 
 - shared test keys will not be throttled just because many requests use the same key

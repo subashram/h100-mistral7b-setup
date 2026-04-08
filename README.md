@@ -300,6 +300,55 @@ Current note:
   - `https://127.0.0.1:8443/mistral/small32/v1`
 - `/v1` currently defaults to the `Mistral` lane, but the router config is designed so that alias can be switched later if needed.
 
+## Changing Routing
+
+The public router lives in:
+
+- `nginx/router-gateway.conf`
+
+Current explicit routes:
+
+- `/v1` -> default alias, currently `Mistral 7B`
+- `/mistral/7b/v1` -> `Mistral 7B`
+- `/mistral/small32/v1` -> `Mistral Small 3.2`
+
+If you want to change the default alias, edit the `/v1/` location in `nginx/router-gateway.conf`.
+
+Current default:
+
+```nginx
+location /v1/ {
+    proxy_pass http://mistral_lane/v1/;
+    ...
+}
+```
+
+To point `/v1` at `Mistral Small 3.2` instead:
+
+```nginx
+location /v1/ {
+    proxy_pass http://small32_lane/v1/;
+    ...
+}
+```
+
+Apply the change on the box with:
+
+```bash
+docker compose up -d --force-recreate --no-deps nginx-router
+./scripts/deploy.sh health
+```
+
+Recommended rule:
+
+- keep `/mistral/7b/v1` and `/mistral/small32/v1` stable
+- only change `/v1` when you want to move the default integration target
+- avoid changing URI aliases, gateway names, and model IDs in the same deployment
+
+That gives integrations a predictable explicit path per model while still letting the default alias move later if priorities change.
+
+This only changes the default alias. The explicit namespaced routes stay stable unless you edit them directly.
+
 What the deploy script does:
 
 1. Runs preflight checks for Docker, NVIDIA runtime, GPU count, disk, and `.env`.
@@ -410,7 +459,14 @@ Current `Mistral Small 3.2` lane results on `/mistral/small32/v1`:
 | --- | --- | --- | --- | ---: | ---: | ---: |
 | Chat, `MAX_TOKENS=128` | `600` | `32` | `100%` | `46.15` | `0.632s` | `0.715s` |
 | Chat, `MAX_TOKENS=128` | `600` | `48` | `100%` | `60.00` | `0.683s` | `0.785s` |
+| Chat, `MAX_TOKENS=128` | `800` | `96` | `100%` | `114.29` | `0.820s` | `0.987s` |
 | Tools, `MAX_TOKENS=128` | `200` | `12` | `100%` | `33.33` | `0.270s` | `0.387s` |
+| Tools, `MAX_TOKENS=128` | `400` | `32` | `100%` | `80.00` | `0.367s` | `0.490s` |
+
+Notes:
+
+- earlier `small32` runs at higher concurrency returned `429` because the lane-specific gateway safeguard was too tight
+- the `small32` lane was retuned to `240 r/s` with burst `120` before the later benchmark runs above
 
 ## First Benchmark Matrix
 

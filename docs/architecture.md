@@ -58,6 +58,24 @@ Responsibilities:
 - public `80 -> 443` redirect
 - exposure control so only host `80/443` need to be opened in the firewall
 
+## URI Routing Model
+
+The public router keeps one movable default alias plus stable explicit model paths:
+
+- `/v1` -> default alias, currently `Mistral 7B`
+- `/mistral/7b/v1` -> explicit `Mistral 7B`
+- `/mistral/small32/v1` -> explicit `Mistral Small 3.2`
+
+This gives integrations two useful properties:
+
+- existing clients can stay on `/v1`
+- operators can move `/v1` later without forcing every client to change at once
+
+Operational rule:
+
+- treat `/mistral/7b/v1` and `/mistral/small32/v1` as stable contracts
+- treat `/v1` as the alias you may repoint when the preferred default model changes
+
 ### Container Gateway Nginx
 
 Responsibilities:
