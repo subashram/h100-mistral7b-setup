@@ -1,11 +1,12 @@
 # =============================================================================
-# Mistral 7B Production Stack — 8xH100, 8 vLLM workers
-# Baseline topology: 1 vLLM instance per GPU for multi-user throughput.
-# =============================================================================
-# Usage: docker compose --env-file .env up -d
+# Mixed-Model Production Stack — 8xH100
+# Topology:
+# - GPUs 0-1: Mistral 7B, one worker per GPU
+# - GPUs 4-7: Mistral Small 3.2, one tensor-parallel worker across 4 GPUs
+# - GPUs 2-3: spare capacity
 # =============================================================================
 
-x-vllm-base: &vllm-base
+x-vllm-common: &vllm-common
   image: ${VLLM_IMAGE:-vllm/vllm-openai:latest}
   runtime: nvidia
   restart: unless-stopped
@@ -23,21 +24,6 @@ x-vllm-base: &vllm-base
     - ${MODEL_CACHE_ROOT:-/mnt/compass/mistral/model-cache}:/root/.cache/huggingface
     - ${VLLM_CACHE_ROOT:-/mnt/compass/mistral/vllm-cache}:/root/.cache/vllm
     - ${LOG_ROOT:-/mnt/compass/mistral/logs}:/var/log/vllm
-  command: >
-    ${MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
-    --dtype ${MODEL_DTYPE:-bfloat16}
-    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.90}
-    --max-model-len ${MAX_MODEL_LEN:-8192}
-    --tokenizer_mode ${TOKENIZER_MODE:-hf}
-    --config_format ${CONFIG_FORMAT:-hf}
-    --load_format ${LOAD_FORMAT:-hf}
-    --enable-auto-tool-choice
-    --tool-call-parser mistral
-    --chat-template ${CHAT_TEMPLATE:-/vllm-workspace/examples/tool_chat_template_mistral_parallel.jinja}
-    --uvicorn-log-level warning
-    --max-num-batched-tokens ${MAX_NUM_BATCHED_TOKENS:-16384}
-    --max-num-seqs ${MAX_NUM_SEQS:-256}
-    --enable-prefix-caching
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
     interval: ${HEALTH_CHECK_INTERVAL:-10s}
@@ -50,90 +36,128 @@ x-vllm-base: &vllm-base
         cpus: "${VLLM_CPU_LIMIT:-10}"
         memory: ${VLLM_MEM_LIMIT:-48g}
 
+x-mistral-base: &mistral-base
+  <<: *vllm-common
+  command: >
+    ${MISTRAL_MODEL_ID:-mistralai/Mistral-7B-Instruct-v0.3}
+    --dtype ${MISTRAL_MODEL_DTYPE:-bfloat16}
+    --gpu-memory-utilization ${MISTRAL_GPU_MEMORY_UTILIZATION:-0.90}
+    --max-model-len ${MISTRAL_MAX_MODEL_LEN:-8192}
+    --tokenizer_mode ${TOKENIZER_MODE:-hf}
+    --config_format ${CONFIG_FORMAT:-hf}
+    --load_format ${LOAD_FORMAT:-hf}
+    --enable-auto-tool-choice
+    --tool-call-parser ${TOOL_CALL_PARSER:-mistral}
+    --chat-template ${CHAT_TEMPLATE:-/vllm-workspace/examples/tool_chat_template_mistral_parallel.jinja}
+    --uvicorn-log-level warning
+    --max-num-batched-tokens ${MISTRAL_MAX_NUM_BATCHED_TOKENS:-16384}
+    --max-num-seqs ${MISTRAL_MAX_NUM_SEQS:-256}
+    --enable-prefix-caching
+
+x-small32-base: &small32-base
+  <<: *vllm-common
+  command: >
+    ${SMALL32_MODEL_ID:-mistralai/Mistral-Small-3.2-24B-Instruct-2506}
+    --dtype ${SMALL32_MODEL_DTYPE:-bfloat16}
+    --gpu-memory-utilization ${SMALL32_GPU_MEMORY_UTILIZATION:-0.92}
+    --max-model-len ${SMALL32_MAX_MODEL_LEN:-131072}
+    --tensor-parallel-size ${SMALL32_TENSOR_PARALLEL_SIZE:-4}
+    --tokenizer_mode ${SMALL32_TOKENIZER_MODE:-mistral}
+    --config_format ${SMALL32_CONFIG_FORMAT:-mistral}
+    --load_format ${SMALL32_LOAD_FORMAT:-mistral}
+    --enable-auto-tool-choice
+    --tool-call-parser ${SMALL32_TOOL_CALL_PARSER:-mistral}
+    --uvicorn-log-level warning
+    --max-num-batched-tokens ${SMALL32_MAX_NUM_BATCHED_TOKENS:-16384}
+    --max-num-seqs ${SMALL32_MAX_NUM_SEQS:-128}
+    --enable-prefix-caching
+
 services:
   # ---------------------------------------------------------------------------
-  # Baseline serving topology: one worker per GPU
+  # Mistral 7B lane: GPUs 0-1
   # ---------------------------------------------------------------------------
-  vllm-g0:
-    <<: *vllm-base
-    container_name: vllm-g0
+  mistral-g0:
+    <<: *mistral-base
+    container_name: mistral-g0
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
     ports: ["8000:8000"]
 
-  vllm-g1:
-    <<: *vllm-base
-    container_name: vllm-g1
+  mistral-g1:
+    <<: *mistral-base
+    container_name: mistral-g1
     environment:
       - NVIDIA_VISIBLE_DEVICES=1
     ports: ["8001:8000"]
 
-  vllm-g2:
-    <<: *vllm-base
-    container_name: vllm-g2
+  # ---------------------------------------------------------------------------
+  # Mistral Small 3.2 lane: GPUs 4-7 via tensor parallelism
+  # ---------------------------------------------------------------------------
+  small32-tp4:
+    <<: *small32-base
+    container_name: small32-tp4
     environment:
-      - NVIDIA_VISIBLE_DEVICES=2
+      - NVIDIA_VISIBLE_DEVICES=${SMALL32_VISIBLE_DEVICES:-4,5,6,7}
     ports: ["8002:8000"]
-
-  vllm-g3:
-    <<: *vllm-base
-    container_name: vllm-g3
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=3
-    ports: ["8003:8000"]
-
-  vllm-g4:
-    <<: *vllm-base
-    container_name: vllm-g4
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=4
-    ports: ["8004:8000"]
-
-  vllm-g5:
-    <<: *vllm-base
-    container_name: vllm-g5
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=5
-    ports: ["8005:8000"]
-
-  vllm-g6:
-    <<: *vllm-base
-    container_name: vllm-g6
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=6
-    ports: ["8006:8000"]
-
-  vllm-g7:
-    <<: *vllm-base
-    container_name: vllm-g7
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=7
-    ports: ["8007:8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: ${HEALTH_CHECK_INTERVAL:-10s}
+      timeout: ${HEALTH_CHECK_TIMEOUT:-5s}
+      retries: ${HEALTH_CHECK_RETRIES:-3}
+      start_period: 240s
 
   # ---------------------------------------------------------------------------
-  # API Gateway — Nginx
+  # Internal lane gateways
   # ---------------------------------------------------------------------------
-  nginx:
+  nginx-mistral:
     image: nginx:1.27-alpine
-    container_name: mistral-gateway
+    container_name: mistral7b-gateway
     restart: unless-stopped
-    ports:
-      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_HTTP_PORT:-8081}:80"
-      - "${GATEWAY_BIND_HOST:-127.0.0.1}:${GATEWAY_HTTPS_PORT:-8443}:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/mistral-gateway.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/api_keys.conf:/etc/nginx/api_keys.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
-      - ${LOG_ROOT:-/mnt/compass/mistral/logs}/nginx:/var/log/nginx
+      - ${LOG_ROOT:-/mnt/compass/mistral/logs}/nginx-mistral:/var/log/nginx
     depends_on:
-      vllm-g0: { condition: service_healthy }
-      vllm-g1: { condition: service_healthy }
-      vllm-g2: { condition: service_healthy }
-      vllm-g3: { condition: service_healthy }
-      vllm-g4: { condition: service_healthy }
-      vllm-g5: { condition: service_healthy }
-      vllm-g6: { condition: service_healthy }
-      vllm-g7: { condition: service_healthy }
+      mistral-g0: { condition: service_healthy }
+      mistral-g1: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  nginx-small32:
+    image: nginx:1.27-alpine
+    container_name: mistralsmall32-gateway
+    restart: unless-stopped
+    volumes:
+      - ./nginx/small32-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/api_keys.conf:/etc/nginx/api_keys.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${LOG_ROOT:-/mnt/compass/mistral/logs}/nginx-small32:/var/log/nginx
+    depends_on:
+      small32-tp4: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  nginx-router:
+    image: nginx:1.27-alpine
+    container_name: mixedmodel-router
+    restart: unless-stopped
+    ports:
+      - "${PUBLIC_GATEWAY_BIND_HOST:-127.0.0.1}:${PUBLIC_GATEWAY_HTTP_PORT:-8081}:80"
+      - "${PUBLIC_GATEWAY_BIND_HOST:-127.0.0.1}:${PUBLIC_GATEWAY_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./nginx/router-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${LOG_ROOT:-/mnt/compass/mistral/logs}/nginx-router:/var/log/nginx
+    depends_on:
+      nginx-mistral: { condition: service_healthy }
+      nginx-small32: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 5s
@@ -180,9 +204,6 @@ services:
     volumes:
       - ./monitoring/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
 
-  # ---------------------------------------------------------------------------
-  # Log aggregation (optional — Loki + Promtail)
-  # ---------------------------------------------------------------------------
   loki:
     image: grafana/loki:2.9.0
     container_name: mistral-loki
@@ -191,14 +212,24 @@ services:
     volumes:
       - ${LOKI_DATA_ROOT:-/mnt/compass/mistral/loki}:/loki
 
-  nginx-exporter:
+  nginx-exporter-mistral:
     image: nginx/nginx-prometheus-exporter:1.1.0
     container_name: mistral-nginx-exporter
     restart: unless-stopped
     command:
-      - --nginx.scrape-uri=http://nginx/nginx_status
+      - --nginx.scrape-uri=http://nginx-mistral/nginx_status
     depends_on:
-      nginx:
+      nginx-mistral:
+        condition: service_started
+
+  nginx-exporter-small32:
+    image: nginx/nginx-prometheus-exporter:1.1.0
+    container_name: small32-nginx-exporter
+    restart: unless-stopped
+    command:
+      - --nginx.scrape-uri=http://nginx-small32/nginx_status
+    depends_on:
+      nginx-small32:
         condition: service_started
 
   dcgm-exporter:

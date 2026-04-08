@@ -4,9 +4,26 @@
 # =============================================================================
 set -euo pipefail
 
-ENDPOINT="${ENDPOINT:-https://localhost/v1}"
+TARGET_STACK="${TARGET_STACK:-mistral}"    # mistral | small32 | mistral-alias
 API_KEY="${API_KEY:-sk-prod-key-1}"
-MODEL="${MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
+if [ "${ENDPOINT:-}" != "" ]; then
+    ENDPOINT="$ENDPOINT"
+elif [ "$TARGET_STACK" = "small32" ]; then
+    ENDPOINT="https://localhost:8443/mistral/small32/v1"
+elif [ "$TARGET_STACK" = "mistral-alias" ]; then
+    ENDPOINT="https://localhost:8443/mistral/7b/v1"
+else
+    ENDPOINT="https://localhost:8443/v1"
+fi
+
+if [ "${MODEL:-}" != "" ]; then
+    MODEL="$MODEL"
+elif [ "$TARGET_STACK" = "small32" ]; then
+    MODEL="mistralai/Mistral-Small-3.2-24B-Instruct-2506"
+else
+    MODEL="mistralai/Mistral-7B-Instruct-v0.3"
+fi
+
 TOTAL_REQUESTS="${TOTAL_REQUESTS:-200}"
 CONCURRENCY="${CONCURRENCY:-32}"
 MAX_TOKENS="${MAX_TOKENS:-64}"
@@ -202,6 +219,7 @@ if [ "$TOTAL_REQUESTS" -eq 0 ] || [ "$CONCURRENCY" -eq 0 ]; then
 fi
 
 log "Benchmarking $ENDPOINT"
+echo "Lane:          $TARGET_STACK"
 echo "Mode:          $TEST_MODE"
 echo "Model:         $MODEL"
 echo "Requests:      $TOTAL_REQUESTS"

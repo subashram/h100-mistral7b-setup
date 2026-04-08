@@ -1,6 +1,32 @@
 # Benchmarking
 
-This document captures the benchmark style used for this deployment and the current measured baseline on the dedicated `8x H100 80GB` node. It is meant to be detailed enough that another team can compare their own results against the same topology and request shape.
+This document captures the benchmark style used for this deployment and the current measured baseline on the dedicated `8x H100 80GB` node.
+
+Important note:
+
+- the measured results below were gathered on the earlier `8x single-GPU Mistral 7B` layout
+- they remain useful as a historical baseline for the `Mistral` lane
+- they should not be treated as the expected performance of the current mixed `Mistral 7B + Mistral Small 3.2` topology
+
+## Current Mixed-Lane Results
+
+The current mixed deployment adds a `Mistral Small 3.2` lane on GPUs `4-7` behind the explicit router path:
+
+- `/mistral/small32/v1`
+
+Measured results on the live box:
+
+| Model | Workload | Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency | Notes |
+| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `200` | `16` | `100%` | `25.00` | `0.595s` | `0.667s` | first validation run |
+| `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `600` | `32` | `100%` | `46.15` | `0.632s` | `0.715s` | stable baseline |
+| `Mistral Small 3.2` | tools, `MAX_TOKENS=128` | `200` | `12` | `100%` | `33.33` | `0.270s` | `0.387s` | tool calling stable |
+| `Mistral Small 3.2` | chat, `MAX_TOKENS=128` | `600` | `48` | `100%` | `60.00` | `0.683s` | `0.785s` | still healthy |
+
+Operational note:
+
+- earlier attempts at `tools@24` and `chat@64` hit the `small32` gateway rate limiter and returned `429`s
+- those runs reflected ingress policy, not a model failure
 
 ## Standard Metrics
 

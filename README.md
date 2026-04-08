@@ -1,13 +1,14 @@
-# Mistral 7B Production Deployment — 8xH100 Node
+# Mixed Mistral Deployment — 8xH100 Node
 
-This repository is tuned for serving `mistralai/Mistral-7B-Instruct-v0.3` on a dedicated `8x H100 80GB` node with:
+This repository is now tuned for a shared-model deployment on a dedicated `8x H100 80GB` node with:
 
-- `8` vLLM workers
-- `1` worker pinned per GPU
-- `Nginx` for auth, rate limiting, and request routing
+- `2` single-GPU `Mistral 7B` workers on GPUs `0-1`
+- `1` `Mistral Small 3.2` worker on GPUs `4-7` with tensor parallel size `4`
+- GPUs `2-3` intentionally left free
+- separate internal `nginx` gateways for the `Mistral 7B` and `Mistral Small 3.2` lanes
 - `Prometheus`, `Grafana`, `Alertmanager`, `Loki`, and `Promtail` for operations
 
-The baseline goal is production-grade multi-user inference with tool/function calling support and enough observability to tune real traffic safely.
+The goal is to keep a lightweight `Mistral 7B` lane available while reserving most of the node for a stronger tool-calling lane using `Mistral Small 3.2`.
 
 Additional documentation:
 
@@ -20,15 +21,15 @@ Additional documentation:
 On hosts that already run a system `nginx`, the recommended pattern is:
 
 - keep the system `nginx` on public ports `80/443`
-- bind the containerized Mistral gateway to `127.0.0.1:8081/8443`
-- let the host `nginx` reverse-proxy into the internal gateway
+- bind the containerized public router to one internal port
+- let that router fan out to the model lanes by URI
 
 This creates a deliberate two-tier ingress model:
 
 - host `nginx`
   Purpose: public entrypoint, host-level TLS termination, and exposure control for only `80/443`
-- container `nginx` gateway
-  Purpose: API-key auth, request shaping, request logging, worker load balancing, and inference-specific routing inside the stack
+- container `nginx` gateways
+  Purpose: API-key auth, request shaping, request logging, worker load balancing, and inference-specific routing inside each model lane
 
 That split keeps public networking concerns separate from model-serving concerns.
 
@@ -42,31 +43,25 @@ Current status:
 
 ```mermaid
 flowchart TD
-    gateway["Nginx API Gateway<br/>TLS, auth, rate limiting, request IDs"] --> g0["vLLM worker<br/>GPU 0"]
-    gateway --> g1["vLLM worker<br/>GPU 1"]
-    gateway --> g2["vLLM worker<br/>GPU 2"]
-    gateway --> g3["vLLM worker<br/>GPU 3"]
-    gateway --> g4["vLLM worker<br/>GPU 4"]
-    gateway --> g5["vLLM worker<br/>GPU 5"]
-    gateway --> g6["vLLM worker<br/>GPU 6"]
-    gateway --> g7["vLLM worker<br/>GPU 7"]
-
-    g0 --> obs["Prometheus, Grafana, Alertmanager, Loki"]
-    g1 --> obs
-    g2 --> obs
-    g3 --> obs
-    g4 --> obs
-    g5 --> obs
-    g6 --> obs
-    g7 --> obs
+    public["Host nginx or direct exposure<br/>public edge"] --> router["Public router<br/>127.0.0.1:8081/8443"]
+    router --> mgtw["Mistral lane gateway"]
+    router --> xgtw["Mistral Small 3.2 lane gateway"]
+    mgtw --> m0["Mistral worker<br/>GPU 0"]
+    mgtw --> m1["Mistral worker<br/>GPU 1"]
+    xgtw --> x0["Mistral Small 3.2 TP4 worker<br/>GPUs 4-7"]
+    x0 --> spare["Spare GPUs<br/>2-3"]
+    m0 --> obs["Prometheus, Grafana, Alertmanager, Loki"]
+    m1 --> obs
+    x0 --> obs
 ```
 
 ## Why This Topology
 
-- `Mistral 7B` is small enough that splitting one model instance across all `8` GPUs is usually unnecessary.
-- `1 worker per GPU` is the cleanest baseline for aggregate multi-user throughput and operational isolation.
-- A single unhealthy worker only costs `1/8` of capacity and is easy to replace during a rolling update.
-- Treat `2 workers per GPU` as an experiment only after benchmarking realistic traffic.
+- `Mistral 7B` remains small enough to run comfortably as single-GPU workers.
+- `Mistral Small 3.2` is large enough that it deserves a multi-GPU lane instead of being treated like another single-GPU replica.
+- `4` GPUs is the clean tensor-parallel starting point for `Mistral Small 3.2`.
+- placing `Mistral Small 3.2` on GPUs `4-7` keeps the four-GPU tensor-parallel worker inside one NUMA half of the box.
+- leaving GPUs `2-3` free creates room for experiments, burst capacity, or a second phase of the rollout.
 
 ## Two-Tier Ingress
 
@@ -75,12 +70,12 @@ This deployment uses two separate `nginx` layers on purpose.
 - host `nginx`
   Role: internet-facing frontend on public `80/443`
 - container `nginx`
-  Role: internal API gateway for the Mistral stack
+  Role: internal API gateways for the model lanes
 
 Why both exist:
 
 - the host layer owns public exposure, host certificates, and the clean `80 -> 443` redirect
-- the container layer owns app-specific behavior like API keys, gateway throttling, upstream retries, structured logs, and balancing across `vllm-g0` through `vllm-g7`
+- the container layer owns app-specific behavior like API keys, gateway throttling, upstream retries, structured logs, and balancing inside each model lane
 - keeping them separate makes it easier to change public TLS or firewall posture without rewriting the inference gateway
 - it also reduces the chance of accidentally exposing internal worker paths or ports directly
 
@@ -174,13 +169,15 @@ You can prepare the benchmarking workflow locally before touching the node:
 
 ## Baseline Topology
 
-- `8` vLLM workers total
-- `1` worker bound to each GPU via `NVIDIA_VISIBLE_DEVICES`
-- host ports `8000` through `8007` exposed for direct worker health and debugging
+- `mistral-g0` on GPU `0`, exposed on host port `8000`
+- `mistral-g1` on GPU `1`, exposed on host port `8001`
+- `small32-tp4` on GPUs `4,5,6,7`, exposed on host port `8002`
+- GPUs `2` and `3` are intentionally unused in the initial mixed-model layout
 - deployed app root at `/opt/compass/mistral`
 - persistent data under `/mnt/compass/mistral`
 - logs under `/mnt/compass/mistral/logs`
-- the containerized `Nginx` gateway listens on `127.0.0.1:8081/8443`
+- the public router listens on `127.0.0.1:8081/8443`
+- the lane gateways stay internal on the Docker network
 - the host `nginx` should front the internal gateway on public ports `80/443`
 - `Grafana` on `3000`
 - `Prometheus` on `9090`
@@ -189,13 +186,19 @@ You can prepare the benchmarking workflow locally before touching the node:
 
 ## Default Tuning
 
-The defaults in `.env.example` are biased toward using the H100s rather than preserving tiny test-box headroom:
+The defaults in `.env.example` are split by lane:
 
-- `GPU_MEMORY_UTILIZATION=0.90`
-- `MAX_MODEL_LEN=8192`
-- `MAX_NUM_BATCHED_TOKENS=16384`
-- `MAX_NUM_SEQS=256`
-- `MODEL_DTYPE=bfloat16`
+- `Mistral`
+  - `MISTRAL_GPU_MEMORY_UTILIZATION=0.90`
+  - `MISTRAL_MAX_MODEL_LEN=8192`
+  - `MISTRAL_MAX_NUM_BATCHED_TOKENS=16384`
+  - `MISTRAL_MAX_NUM_SEQS=256`
+- `Mistral Small 3.2`
+  - `SMALL32_TENSOR_PARALLEL_SIZE=4`
+  - `SMALL32_GPU_MEMORY_UTILIZATION=0.92`
+  - `SMALL32_MAX_MODEL_LEN=131072`
+  - `SMALL32_MAX_NUM_BATCHED_TOKENS=16384`
+  - `SMALL32_MAX_NUM_SEQS=128`
 - `VLLM_CPU_LIMIT=10`
 - `VLLM_MEM_LIMIT=48g`
 - `VLLM_SHM_SIZE=8g`
@@ -212,12 +215,12 @@ These are good starting points, not guaranteed final values. You should tune the
 
 ## Tool / Function Calling
 
-The serving stack is configured with:
+Both serving lanes are configured with:
 
 - `--enable-auto-tool-choice`
 - `--tool-call-parser mistral`
 
-This enables OpenAI-compatible tool/function calling behavior through vLLM for Mistral Instruct.
+This is the current best starting point for both `Mistral 7B` and `Mistral Small 3.2`, but the `Small 3.2` lane should be revalidated with the same tool-call tests before it is treated as production-ready.
 
 ## Configuration Checklist
 
@@ -241,7 +244,7 @@ Common commands:
 ./scripts/deploy.sh health
 ./scripts/deploy.sh status
 ./scripts/deploy.sh logs
-./scripts/deploy.sh logs vllm-g3
+./scripts/deploy.sh logs small32-tp4
 ./scripts/deploy.sh rolling-update
 ./scripts/deploy.sh stop
 ```
@@ -252,16 +255,18 @@ Useful validation commands:
 ./scripts/smoke-test.sh
 ./scripts/api-test.sh
 TEST_MODE=tools ./scripts/api-test.sh
-ENDPOINT=http://127.0.0.1:8081/v1 ./scripts/api-test.sh
+ENDPOINT=https://127.0.0.1:8443/v1 ./scripts/api-test.sh
 ```
 
 ## Router Handoff
 
-For upstream routing teams, expose this service as an OpenAI-compatible API.
+For upstream routing teams, expose one OpenAI-compatible API entrypoint and route by URI.
 
 Expected interface:
 
-- Base URL: `https://<public-host>/v1`
+- Default alias: `https://<public-host>/v1`
+- Explicit `Mistral` alias: `https://<public-host>/mistral/7b/v1`
+- Explicit `Mistral Small 3.2` alias: `https://<public-host>/mistral/small32/v1`
 - Chat completions: `POST /v1/chat/completions`
 - Models: `GET /v1/models`
 - Health: `GET /health`
@@ -289,17 +294,21 @@ curl https://<public-host>/v1/chat/completions \
 Current note:
 
 - The router-facing public `443` endpoint is still pending final host TLS and cloud firewall setup.
-- The internal working gateway for local validation is `https://127.0.0.1:8443/v1` on the box, or `https://127.0.0.1:18443/v1` through the SSH tunnel.
+- The current internal/public-router aliases are:
+  - `https://127.0.0.1:8443/v1`
+  - `https://127.0.0.1:8443/mistral/7b/v1`
+  - `https://127.0.0.1:8443/mistral/small32/v1`
+- `/v1` currently defaults to the `Mistral` lane, but the router config is designed so that alias can be switched later if needed.
 
 What the deploy script does:
 
 1. Runs preflight checks for Docker, NVIDIA runtime, GPU count, disk, and `.env`.
 2. Starts monitoring services first.
-3. Starts `vllm-g0` first to warm the shared model cache.
-4. Starts the remaining `7` workers after the first worker is healthy.
-5. Waits for all workers to report healthy.
-6. Starts the internal `Nginx` gateway and the Nginx Prometheus exporter.
-7. Expects the host `nginx` to proxy public traffic to `127.0.0.1:8081`.
+3. Starts the two `Mistral` workers on GPUs `0-1`.
+4. Starts the `Mistral Small 3.2` TP4 worker on GPUs `4-7`.
+5. Waits for all three serving processes to report healthy.
+6. Starts both internal gateways and both Nginx Prometheus exporters.
+7. Expects the host `nginx` to proxy public traffic to the desired internal lane.
 
 ## Monitoring Access
 
@@ -317,6 +326,7 @@ Example tunnel:
 ```bash
 ssh -i ~/.ssh/id_ed25519_compass_mistral \
   -L 8088:localhost:80 \
+  -L 8443:localhost:8443 \
   -L 3000:localhost:3000 \
   -L 9090:localhost:9090 \
   -L 9093:localhost:9093 \
@@ -327,6 +337,7 @@ ssh -i ~/.ssh/id_ed25519_compass_mistral \
 Then open:
 
 - `http://localhost:8088` for the host `nginx` entrypoint
+- `https://localhost:8443` for the direct router TLS port
 - `http://localhost:3000` for Grafana
 - `http://localhost:9090` for Prometheus
 - `http://localhost:9093` for Alertmanager
@@ -340,8 +351,11 @@ Use `scripts/benchmark.sh` for concurrent multi-user load tests against the Open
 Example runs:
 
 ```bash
-# Baseline chat benchmark
+# Baseline Mistral benchmark
 TOTAL_REQUESTS=400 CONCURRENCY=32 ./scripts/benchmark.sh
+
+# Mistral Small 3.2 benchmark
+TARGET_STACK=small32 TOTAL_REQUESTS=200 CONCURRENCY=8 ./scripts/benchmark.sh
 
 # Streaming benchmark
 TEST_MODE=stream TOTAL_REQUESTS=200 CONCURRENCY=24 ./scripts/benchmark.sh
@@ -353,6 +367,7 @@ TEST_MODE=tools TOTAL_REQUESTS=200 CONCURRENCY=24 ./scripts/benchmark.sh
 Useful knobs:
 
 - `ENDPOINT`
+- `TARGET_STACK`
 - `API_KEY`
 - `MODEL`
 - `TOTAL_REQUESTS`
@@ -372,7 +387,7 @@ The script reports:
 - p50 latency
 - p95 latency
 
-Current measured baseline on the dedicated `8x H100 80GB` node:
+Historical measured baseline on the earlier all-`Mistral 7B` layout:
 
 | Workload | Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency |
 | --- | --- | --- | --- | ---: | ---: | ---: |
@@ -384,19 +399,28 @@ Current measured baseline on the dedicated `8x H100 80GB` node:
 
 Notes:
 
+- these results were gathered before the mixed `Mistral 7B + Mistral Small 3.2` split
 - the soak run lasted about `10.7` minutes with queue depth staying at `0`
 - tool-calling results only apply after the current Mistral parser and chat-template fix in this repo
 - full benchmark context and comparison guidance live in [Benchmarking](docs/benchmarking.md)
 
+Current `Mistral Small 3.2` lane results on `/mistral/small32/v1`:
+
+| Workload | Total Requests | Concurrency | Success Rate | Req/s | Avg Latency | P95 Latency |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| Chat, `MAX_TOKENS=128` | `600` | `32` | `100%` | `46.15` | `0.632s` | `0.715s` |
+| Chat, `MAX_TOKENS=128` | `600` | `48` | `100%` | `60.00` | `0.683s` | `0.785s` |
+| Tools, `MAX_TOKENS=128` | `200` | `12` | `100%` | `33.33` | `0.270s` | `0.387s` |
+
 ## First Benchmark Matrix
 
-When the box becomes available, start with:
+For the mixed-model layout, start with:
 
-1. `8 workers`, `CONCURRENCY=16`, `TEST_MODE=chat`
-2. `8 workers`, `CONCURRENCY=32`, `TEST_MODE=chat`
-3. `8 workers`, `CONCURRENCY=64`, `TEST_MODE=chat`
-4. `8 workers`, `CONCURRENCY=24`, `TEST_MODE=tools`
-5. `8 workers`, `CONCURRENCY=24`, `TEST_MODE=stream`
+1. `Mistral`, `CONCURRENCY=16`, `TEST_MODE=chat`
+2. `Mistral`, `CONCURRENCY=32`, `TEST_MODE=tools`
+3. `Small32`, `CONCURRENCY=4`, `TEST_MODE=chat`
+4. `Small32`, `CONCURRENCY=4`, `TEST_MODE=tools`
+5. `Small32`, longer outputs with `MAX_TOKENS=256`
 
 After that, tune one variable at a time:
 

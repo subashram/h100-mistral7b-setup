@@ -3,7 +3,7 @@ groups:
     rules:
       # Instance down for > 2 minutes
       - alert: VLLMInstanceDown
-        expr: up{job="vllm"} == 0
+        expr: up{job=~"vllm-.*"} == 0
         for: 2m
         labels:
           severity: critical
@@ -14,7 +14,7 @@ groups:
       # All instances on a GPU are down
       - alert: VLLMGPUPoolDown
         expr: |
-          count by (gpu) (up{job="vllm"} == 0) == 1
+          count by (gpu) (up{job="vllm-mistral"} == 0) == 1
         for: 1m
         labels:
           severity: critical

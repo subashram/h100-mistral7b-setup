@@ -1,38 +1,49 @@
 # Architecture
 
-This deployment is designed for a single dedicated `8x H100 80GB` node serving `mistralai/Mistral-7B-Instruct-v0.3`.
+This deployment is designed for a single dedicated `8x H100 80GB` node serving both `mistralai/Mistral-7B-Instruct-v0.3` and `mistralai/Mistral-Small-3.2-24B-Instruct-2506`.
 
 ## Topology
 
 ```mermaid
 flowchart TD
-    public["Host nginx<br/>public :80"] --> internal["Container nginx<br/>127.0.0.1:8081 / 8443"]
-    internal --> g0["vLLM g0<br/>GPU 0"]
-    internal --> g1["vLLM g1<br/>GPU 1"]
-    internal --> g2["vLLM g2<br/>GPU 2"]
-    internal --> g3["vLLM g3<br/>GPU 3"]
-    internal --> g4["vLLM g4<br/>GPU 4"]
-    internal --> g5["vLLM g5<br/>GPU 5"]
-    internal --> g6["vLLM g6<br/>GPU 6"]
-    internal --> g7["vLLM g7<br/>GPU 7"]
+    public["Host nginx or direct exposure<br/>public edge"] --> router["Public router<br/>127.0.0.1:8081 / 8443"]
+    router --> mistral_gateway["Mistral lane gateway"]
+    router --> small32_gateway["Mistral Small 3.2 lane gateway"]
+    mistral_gateway --> m0["mistral-g0<br/>GPU 0"]
+    mistral_gateway --> m1["mistral-g1<br/>GPU 1"]
+    small32_gateway --> x0["small32-tp4<br/>GPUs 4-7"]
+    x0 --> spare["Spare GPUs<br/>2-3"]
 
-    g0 --> obs["Prometheus / Grafana / Alertmanager / Loki"]
-    g1 --> obs
-    g2 --> obs
-    g3 --> obs
-    g4 --> obs
-    g5 --> obs
-    g6 --> obs
-    g7 --> obs
+    m0 --> obs["Prometheus / Grafana / Alertmanager / Loki"]
+    m1 --> obs
+    x0 --> obs
 ```
 
 ## Key Design Choices
 
-- One `vLLM` worker per GPU is the baseline.
+- `Mistral 7B` runs as two single-GPU workers on GPUs `0` and `1`.
+- `Mistral Small 3.2` runs as one tensor-parallel worker across GPUs `4-7`.
+- GPUs `2` and `3` stay free in the initial mixed-model rollout.
 - The public entrypoint stays on the host `nginx`.
-- The application gateway runs in Docker and binds only to `127.0.0.1`.
+- The application gateways run in Docker and bind only to internal ports.
 - Heavy persistent state lives under `/mnt/compass/mistral`.
 - App code and deployment config live under `/opt/compass/mistral`.
+
+## GPU Placement Logic
+
+The chosen placement is:
+
+- `Mistral 7B`: GPUs `0-1`
+- spare capacity: GPUs `2-3`
+- `Mistral Small 3.2`: GPUs `4-7`
+
+Why this layout was chosen:
+
+- the box exposes full `NV18` connectivity between all GPUs, so `Mistral Small 3.2` does not require a special NVLink island
+- the more meaningful placement constraint is NUMA locality
+- GPUs `0-3` live on one CPU/NUMA half of the machine, while GPUs `4-7` live on the other
+- keeping the four-GPU `Mistral Small 3.2` worker entirely inside GPUs `4-7` avoids spanning NUMA halves for the multi-GPU model
+- the lighter `Mistral` lane remains simple on GPUs `0-1`, and GPUs `2-3` stay available for future expansion
 
 ## Two-Tier Nginx Model
 
@@ -51,11 +62,12 @@ Responsibilities:
 
 Responsibilities:
 
-- OpenAI-compatible API gateway inside the stack
+- public URI-based router
+- lane-specific OpenAI-compatible gateways inside the stack
 - API-key authentication
 - gateway rate limiting and basic ingress protection
 - request ID injection and structured JSON access logs
-- balancing across the eight `vLLM` workers
+- balancing across the two `Mistral` workers or proxying into the single `Mistral Small 3.2` lane
 - worker-facing health, metrics, and gateway-specific operational endpoints
 
 ### Why Keep Them Separate
@@ -65,6 +77,7 @@ Responsibilities:
 - app-specific gateway policy stays versioned with the repo
 - the blast radius is smaller if the public frontend needs emergency changes
 - operators can reason separately about network exposure and inference behavior
+- one open public port can still expose multiple model lanes by URI
 
 ## Runtime Layout
 
@@ -86,9 +99,13 @@ Responsibilities:
 ## Network Model
 
 - Public HTTP currently terminates at host `nginx` on port `80`.
-- Host `nginx` proxies to `127.0.0.1:8081`.
-- Containerized `nginx` proxies to the eight `vLLM` workers over the Docker network.
-- Worker health and debugging remain available on ports `8000` to `8007`.
+- Host `nginx` should proxy to the public router on `127.0.0.1:8081`.
+- The public router exposes three useful URI entrypoints:
+  - `/v1`
+  - `/mistral/7b/v1`
+  - `/mistral/small32/v1`
+- Containerized `nginx` proxies from the public router to the model-serving lanes over the Docker network.
+- Worker health and debugging remain available on ports `8000`, `8001`, and `8002`.
 
 ## Current Gaps
 

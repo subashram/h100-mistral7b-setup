@@ -11,37 +11,38 @@ alerting:
         - targets: ["alertmanager:9093"]
 
 scrape_configs:
-  - job_name: "vllm"
+  - job_name: "vllm-mistral"
     static_configs:
-      - targets: ["vllm-g0:8000"]
+      - targets: ["mistral-g0:8000"]
         labels:
           gpu: "0"
-      - targets: ["vllm-g1:8000"]
+          model_lane: "mistral7b"
+      - targets: ["mistral-g1:8000"]
         labels:
           gpu: "1"
-      - targets: ["vllm-g2:8000"]
-        labels:
-          gpu: "2"
-      - targets: ["vllm-g3:8000"]
-        labels:
-          gpu: "3"
-      - targets: ["vllm-g4:8000"]
-        labels:
-          gpu: "4"
-      - targets: ["vllm-g5:8000"]
-        labels:
-          gpu: "5"
-      - targets: ["vllm-g6:8000"]
-        labels:
-          gpu: "6"
-      - targets: ["vllm-g7:8000"]
-        labels:
-          gpu: "7"
+          model_lane: "mistral7b"
     metrics_path: /metrics
 
-  - job_name: "nginx"
+  - job_name: "vllm-small32"
     static_configs:
-      - targets: ["nginx-exporter:9113"]
+      - targets: ["small32-tp4:8000"]
+        labels:
+          gpu_group: "4-7"
+          model_lane: "mistral-small-3.2"
+    metrics_path: /metrics
+
+  - job_name: "nginx-mistral"
+    static_configs:
+      - targets: ["nginx-exporter-mistral:9113"]
+        labels:
+          model_lane: "mistral7b"
+    metrics_path: /metrics
+
+  - job_name: "nginx-small32"
+    static_configs:
+      - targets: ["nginx-exporter-small32:9113"]
+        labels:
+          model_lane: "mistral-small-3.2"
     metrics_path: /metrics
 
   - job_name: "nvidia-gpu"

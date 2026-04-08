@@ -11,7 +11,7 @@ This document covers day-2 commands and checks for the running stack.
 ./scripts/deploy.sh status
 ./scripts/deploy.sh health
 ./scripts/deploy.sh logs
-./scripts/deploy.sh logs vllm-g3
+./scripts/deploy.sh logs small32-tp4
 ./scripts/deploy.sh rolling-update
 ```
 
@@ -27,13 +27,15 @@ Direct worker checks:
 
 ```bash
 curl http://localhost:8000/health
-curl http://localhost:8007/health
+curl http://localhost:8001/health
+curl http://localhost:8002/health
 ```
 
 Internal gateway check:
 
 ```bash
 curl http://127.0.0.1:8081/health
+curl -k https://127.0.0.1:8443/health
 ```
 
 Public host entrypoint check:
@@ -47,8 +49,10 @@ curl -I http://127.0.0.1/
 Container logs:
 
 ```bash
-docker compose logs --tail=100 vllm-g0
-docker compose logs --tail=100 nginx
+docker compose logs --tail=100 mistral-g0
+docker compose logs --tail=100 small32-tp4
+docker compose logs --tail=100 nginx-mistral
+docker compose logs --tail=100 nginx-small32
 docker compose logs --tail=100 prometheus
 ```
 
@@ -73,8 +77,9 @@ nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader
 
 Healthy steady state for the current stack usually looks like:
 
-- all `8` GPUs allocated
-- about `72 GiB` used per GPU at idle after warmup
+- GPUs `0-1` allocated to `Mistral`
+- GPUs `4-7` allocated to `Mistral Small 3.2`
+- GPUs `2-3` available as spare capacity
 
 ## Benchmarking
 
@@ -82,6 +87,7 @@ Quick load test:
 
 ```bash
 ./scripts/benchmark.sh
+TARGET_STACK=small32 ./scripts/benchmark.sh
 ```
 
 Targeted API validation:
@@ -89,6 +95,7 @@ Targeted API validation:
 ```bash
 ./scripts/api-test.sh
 TEST_MODE=tools ./scripts/api-test.sh
+TARGET_STACK=small32 ./scripts/api-test.sh
 ```
 
 ## Monitoring Access

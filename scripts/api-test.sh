@@ -4,12 +4,29 @@
 # =============================================================================
 set -euo pipefail
 
-ENDPOINT="${ENDPOINT:-http://127.0.0.1:8081/v1}"
+TARGET_STACK="${TARGET_STACK:-mistral}"   # mistral | small32 | mistral-alias
 API_KEY="${API_KEY:-sk-prod-key-1}"
-MODEL="${MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
+if [ "${ENDPOINT:-}" != "" ]; then
+    ENDPOINT="$ENDPOINT"
+elif [ "$TARGET_STACK" = "small32" ]; then
+    ENDPOINT="https://127.0.0.1:8443/mistral/small32/v1"
+elif [ "$TARGET_STACK" = "mistral-alias" ]; then
+    ENDPOINT="https://127.0.0.1:8443/mistral/7b/v1"
+else
+    ENDPOINT="https://127.0.0.1:8443/v1"
+fi
+
+if [ "${MODEL:-}" != "" ]; then
+    MODEL="$MODEL"
+elif [ "$TARGET_STACK" = "small32" ]; then
+    MODEL="mistralai/Mistral-Small-3.2-24B-Instruct-2506"
+else
+    MODEL="mistralai/Mistral-7B-Instruct-v0.3"
+fi
+
 TEST_MODE="${TEST_MODE:-full}"    # chat | stream | tools | full
 REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-180}"
-INSECURE_TLS="${INSECURE_TLS:-0}"
+INSECURE_TLS="${INSECURE_TLS:-1}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 TMP_DIR="$(mktemp -d)"
@@ -180,6 +197,7 @@ EOF
 
 echo "API Testing: $ENDPOINT"
 echo "Model:       $MODEL"
+echo "Lane:        $TARGET_STACK"
 echo "Mode:        $TEST_MODE"
 echo "========================"
 
