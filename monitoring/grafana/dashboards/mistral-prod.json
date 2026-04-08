@@ -67,7 +67,7 @@
       },
       "id": 10,
       "options": {
-        "content": "Operator shortcuts:\n\n- [Explore metrics](/explore?left=%5B%22now-1h%22,%22now%22,%22prometheus%22,%7B%22expr%22:%22sum(vllm:num_requests_waiting%7Bjob%3D~%5C%22vllm-.%2A%5C%22%7D)%22,%22range%22:true%7D%5D)\n- [Explore logs](/explore?left=%5B%22now-1h%22,%22now%22,%22loki%22,%7B%22expr%22:%22%7Bjob%3D~%5C%22nginx-.%2A%7Cvllm-.%2A%5C%22%7D%22,%22queryType%22:%22range%22%7D%5D)\n- [View alert rules](/alerting/list)\n- [View silences](/alerting/silences)",
+        "content": "Operator shortcuts:\n\n- [Explore metrics](/explore?left=%5B%22now-1h%22,%22now%22,%22prometheus%22,%7B%22expr%22:%22sum(vllm:num_requests_waiting%7Bjob%3D~%5C%22vllm-.%2A%5C%22%7D)%22,%22range%22:true%7D%5D)\n- [Explore logs](/explore?left=%5B%22now-1h%22,%22now%22,%22loki%22,%7B%22expr%22:%22%7Bjob%3D~%5C%22nginx.%2A%7Cvllm.%2A%5C%22%7D%22,%22queryType%22:%22range%22%7D%5D)\n- [View alert rules](/alerting/list)\n- [View silences](/alerting/silences)",
         "mode": "markdown"
       },
       "pluginVersion": "10.4.0",
@@ -496,7 +496,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": false
@@ -545,7 +545,7 @@
       },
       "targets": [
         {
-          "expr": "{job=~\"nginx-.*|vllm-.*\"}",
+          "expr": "{job=~\"nginx.*|vllm.*\"}",
           "queryType": "range",
           "refId": "A"
         }
@@ -647,7 +647,6 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
         "x": 12,
         "y": 36
       },

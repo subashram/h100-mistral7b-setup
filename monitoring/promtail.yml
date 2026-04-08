@@ -8,12 +8,13 @@ clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  - job_name: nginx
+  - job_name: nginx-router
     static_configs:
       - targets: [localhost]
         labels:
-          job: nginx
-          __path__: /var/log/compass/mistral/nginx/*.log
+          job: nginx-router
+          service: nginx-router
+          __path__: /var/log/compass/mistral/nginx-router/*.log
     pipeline_stages:
       - json:
           expressions:
@@ -24,9 +25,46 @@ scrape_configs:
           status:
           upstream:
 
+  - job_name: nginx-mistral
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx-mistral
+          service: nginx-mistral
+          __path__: /var/log/compass/mistral/nginx-mistral/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            status: status
+            request_time: request_time
+            upstream: upstream_addr
+      - labels:
+          status:
+          upstream:
+
+  - job_name: nginx-small32
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx-small32
+          service: nginx-small32
+          __path__: /var/log/compass/mistral/nginx-small32/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            status: status
+            request_time: request_time
+            upstream: upstream_addr
+      - labels:
+          status:
+          upstream:
+
+  # Optional future path if vLLM starts writing structured files into the
+  # shared log root. Today most model-worker logs live on container stdout.
   - job_name: vllm
     static_configs:
       - targets: [localhost]
         labels:
           job: vllm
-          __path__: /var/log/compass/mistral/*.log
+          service: vllm
+          __path__: /var/log/compass/mistral/vllm/*.log

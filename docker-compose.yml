@@ -180,7 +180,7 @@ services:
       - ${PROMETHEUS_DATA_ROOT:-/mnt/compass/mistral/prometheus}:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.retention.time=7d'
       - '--web.enable-lifecycle'
 
   grafana:
@@ -210,7 +210,10 @@ services:
     restart: unless-stopped
     ports: ["3100:3100"]
     volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
       - ${LOKI_DATA_ROOT:-/mnt/compass/mistral/loki}:/loki
+    command:
+      - -config.file=/etc/loki/local-config.yaml
 
   nginx-exporter-mistral:
     image: nginx/nginx-prometheus-exporter:1.1.0
