@@ -222,6 +222,39 @@ Both serving lanes are configured with:
 
 This is the current best starting point for both `Mistral 7B` and `Mistral Small 3.2`, but the `Small 3.2` lane should be revalidated with the same tool-call tests before it is treated as production-ready.
 
+## Capability Matrix
+
+`Mistral Small 3.2` supports a broader set of capabilities in Mistral's hosted platform than this self-hosted deployment exposes today.
+
+Current deployment status:
+
+| Capability | Current deployment | Notes |
+| --- | --- | --- |
+| Chat completions | Supported | Verified in `scripts/api-test.sh` and `scripts/capability-test.sh` |
+| Streaming chat | Supported | Verified in `scripts/api-test.sh` and `scripts/capability-test.sh` |
+| Tool / function calling | Supported | Verified on both `Mistral 7B` and `Mistral Small 3.2` lanes |
+| Models listing | Supported | `GET /v1/models` |
+| Structured outputs | Not yet validated | Model may support it, but this deployment does not currently test or document it |
+| Predicted outputs | Not yet validated | Not currently tested in this deployment |
+| Prefix caching | Internal optimization only | Enabled in `vLLM`, but not exposed as a user-facing API feature |
+| OCR | Not supported in this deployment | Would require another service / workflow beyond the current text-only stack |
+| Document QnA | Not supported in this deployment | This is a platform workflow, not just a model switch |
+| OCR annotations / bbox extraction | Not supported in this deployment | Would require another service / OCR pipeline |
+| Agents / conversations | Not supported in this deployment | Would require another service / orchestration layer |
+| Built-in hosted tools | Not supported in this deployment | Current stack supports model tool calling, not Mistral hosted tools |
+
+The practical distinction is:
+
+- model features are things the self-hosted model can do directly, like chat and tool calling
+- platform features are things Mistral's hosted service adds around the model, like OCR and Document QnA workflows
+
+To verify the current matrix against a live deployment, run:
+
+```bash
+./scripts/capability-test.sh
+TARGET_STACK=small32 ./scripts/capability-test.sh
+```
+
 ## Configuration Checklist
 
 Before first deployment, review:

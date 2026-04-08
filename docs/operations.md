@@ -96,7 +96,14 @@ Targeted API validation:
 ./scripts/api-test.sh
 TEST_MODE=tools ./scripts/api-test.sh
 TARGET_STACK=small32 ./scripts/api-test.sh
+./scripts/capability-test.sh
+TARGET_STACK=small32 ./scripts/capability-test.sh
 ```
+
+Use `capability-test.sh` when you want to verify both:
+
+- the features this deployment intentionally supports
+- the platform-style features that are intentionally not exposed here, such as OCR and Document QnA
 
 ## Monitoring Access
 
